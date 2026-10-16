@@ -12,115 +12,179 @@ import os
 @main
 struct MyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
+    
     @AppStorage("enableAppSwitcher") private var enableAppSwitcher = false
     @AppStorage("enableDockClicks") private var enableDockClicks = true
-    @AppStorage("enableAutoQuit") private var enableAutoQuit = true
+    @AppStorage("enableAutoQuit") private var enableAutoQuit = false
     @AppStorage("enableQuitProtection") private var enableQuitProtection = true
     @AppStorage("enableCommandX") private var enableCommandX = true
     @AppStorage("enableScrollReverse") private var enableScrollReverse = true
-
+    @AppStorage("enableCleaningMode") private var enableCleaningMode = false
+    
+    @State private var accessibilityGranted = PermissionsManager.hasAccessibility
+    @State private var inputMonitoringGranted = PermissionsManager.hasInputMonitoring
+    @State private var inputTapActive = false
+    
     private var menuBarImage: NSImage {
-        if let image = NSImage(named: "MenuBarIcon") {
-            let resized = image.copy() as! NSImage
-            resized.size = NSSize(width: 14, height: 14)
-            resized.isTemplate = true
-            return resized
+        if let image = NSImage(named: "MenuBarIcon"), let copy = image.copy() as? NSImage {
+            copy.size = NSSize(width: 14, height: 14)
+            copy.isTemplate = true
+            return copy
         }
-        let fallback = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: "WinManager")!
+        
+        let fallback = NSImage(
+            systemSymbolName: "macwindow.on.rectangle",
+            accessibilityDescription: "WinManager"
+        ) ?? NSImage(size: NSSize(width: 14, height: 14))
         fallback.size = NSSize(width: 14, height: 14)
         fallback.isTemplate = true
         return fallback
     }
-
+    
     var body: some Scene {
         MenuBarExtra {
-            // Permission Status & Action Banners
-            if !PermissionsManager.hasAccessibility || !PermissionsManager.hasInputMonitoring {
-                Text("⚠️ Permissions Required")
-                    .font(.caption)
-
-                if !PermissionsManager.hasAccessibility {
-                    Button("Grant Accessibility…") {
-                        PermissionsManager.openAccessibilitySettings()
-                        PermissionsManager.requestAccessibilityPrompt()
+            Group {
+                if !accessibilityGranted || !inputMonitoringGranted {
+                    Text("WinManager needs permissions")
+                        .font(.caption)
+                    
+                    if !accessibilityGranted {
+                        Button("Request Accessibility Permission…") {
+                            _ = PermissionsManager.requestAccessibilityPrompt()
+                        }
+                        Button("Open Accessibility Settings…") {
+                            PermissionsManager.openAccessibilitySettings()
+                        }
                     }
-                }
-
-                if !PermissionsManager.hasInputMonitoring {
-                    Button("Grant Input Monitoring…") {
-                        PermissionsManager.openInputMonitoringSettings()
-                        PermissionsManager.requestInputMonitoringPrompt()
+                    
+                    if !inputMonitoringGranted {
+                        Button("Request Input Monitoring…") {
+                            _ = PermissionsManager.requestInputMonitoringPrompt()
+                        }
+                        Button("Open Input Monitoring Settings…") {
+                            PermissionsManager.openInputMonitoringSettings()
+                        }
                     }
+                    
+                    Button("Refresh Permission Status") {
+                        refreshPermissionState()
+                    }
+                    Divider()
                 }
-
-                Button("Check & Reconnect Tap") {
-                    appDelegate.featureController.refreshPermissions()
+                
+                if inputMonitoringGranted && !inputTapActive {
+                    Text("Global input features are inactive. Refresh permissions to retry.")
+                        .font(.caption)
+                    Button("Retry Input Tap") {
+                        refreshPermissionState()
+                    }
+                    Divider()
                 }
-
+                
+                Toggle("App Switcher (⌘Tab)", isOn: $enableAppSwitcher)
+                    .onChange(of: enableAppSwitcher) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
                 Divider()
+                
+                Toggle("Dock Click to Minimize", isOn: $enableDockClicks)
+                    .onChange(of: enableDockClicks) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
+                Toggle("Quit on Last Window Close (Best Effort)", isOn: $enableAutoQuit)
+                    .onChange(of: enableAutoQuit) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
+                Toggle("Quit Protection (Hold ⌘Q)", isOn: $enableQuitProtection)
+                    .onChange(of: enableQuitProtection) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
+                Divider()
+                
+                Toggle("Reverse Conventional Mouse Wheel", isOn: $enableScrollReverse)
+                    .onChange(of: enableScrollReverse) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
+                Toggle("Finder Cut & Paste (⌘X to Move)", isOn: $enableCommandX)
+                    .onChange(of: enableCommandX) { _, _ in
+                        appDelegate.featureController.refreshFeatureState()
+                    }
+                
+                Divider()
+                
+                if enableCleaningMode {
+                    Button("Disable Cleaning Mode") {
+                        appDelegate.featureController.disableCleaningMode()
+                    }
+                } else {
+                    Button("Cleaning Mode…") {
+                        guard confirmCleaningMode() else { return }
+                        appDelegate.featureController.enableCleaningMode()
+                    }
+                }
+                
+                Divider()
+                
+                Button("Open Privacy Settings…") {
+                    PermissionsManager.openGeneralPrivacySettings()
+                }
+                
+                Button("Quit WinManager") {
+                    NSApplication.shared.terminate(nil)
+                }
             }
-
-            // Window Management
-            Toggle("App Switcher (⌘Tab)", isOn: $enableAppSwitcher)
-
-            Divider()
-
-            // Dock & Apps
-            Toggle("Dock Click to Minimize", isOn: $enableDockClicks)
-            Toggle("Quit on Last Window Close", isOn: $enableAutoQuit)
-            Toggle("Quit Protection (Hold ⌘Q)", isOn: $enableQuitProtection)
-
-            Divider()
-
-            // System Utilities
-            Toggle("Scroll Reverse (External Mouse)", isOn: $enableScrollReverse)
-            Toggle("Finder Cut & Paste (⌘X to Move)", isOn: $enableCommandX)
-
-            Divider()
-
-            Button("Open Privacy Settings…") {
-                PermissionsManager.openGeneralPrivacySettings()
-            }
-
-            Button("Quit WinManager") {
-                NSApplication.shared.terminate(nil)
-            }
+            .onAppear { refreshPermissionState() }
         } label: {
             Image(nsImage: menuBarImage)
         }
         .menuBarExtraStyle(.menu)
+    }
+    
+    private func confirmCleaningMode() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Enable Cleaning Mode?"
+        alert.informativeText = "Keyboard input will be blocked for up to 60 seconds. Mouse input remains available. You can disable this mode from the WinManager menu at any time."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Enable for 60 Seconds")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    
+    private func refreshPermissionState() {
+        accessibilityGranted = PermissionsManager.hasAccessibility
+        inputMonitoringGranted = PermissionsManager.hasInputMonitoring
+        appDelegate.featureController.refreshPermissions()
+        inputTapActive = appDelegate.featureController.isInputTapActive
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger(subsystem: "com.riyazjpersonalteam.WinManager", category: "AppDelegate")
     let featureController = FeatureController()
-
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-
-        let axTrusted = PermissionsManager.hasAccessibility
-        let imTrusted = PermissionsManager.hasInputMonitoring
-        logger.info("WinManager Launch -> Accessibility: \(axTrusted) | Input Monitoring: \(imTrusted)")
-
-        // Request both necessary permissions at startup
-        PermissionsManager.requestAllPermissions()
-
+        
+        logger.info("WinManager starting")
         featureController.start()
-
-        // Recheck permissions and reconnect tap when user switches back to the app
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.featureController.refreshPermissions()
-        }
+        
+        // Request the required privacy permissions on first launch. macOS may
+        // suppress repeat prompts; the menu always provides manual recovery paths.
+        PermissionsManager.requestMissingPermissionsOnLaunch()
+        featureController.refreshPermissions()
     }
-
+    
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // This only runs when WinManager becomes active; it is not a polling task.
+        featureController.refreshPermissions()
+    }
+    
     func applicationWillTerminate(_ notification: Notification) {
         featureController.stop()
     }
 }
-

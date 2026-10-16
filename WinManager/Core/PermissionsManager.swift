@@ -7,61 +7,64 @@
 
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import os
 
 enum PermissionsManager {
     private static let logger = Logger(subsystem: "com.riyazjpersonalteam.WinManager", category: "Permissions")
-
+    
     static var hasAccessibility: Bool {
         AXIsProcessTrusted()
     }
-
+    
     static var hasInputMonitoring: Bool {
         CGPreflightListenEventAccess()
     }
-
+    
     static var allGranted: Bool {
         hasAccessibility && hasInputMonitoring
     }
-
+    
     @discardableResult
     static func requestAccessibilityPrompt() -> Bool {
-        logger.info("Requesting Accessibility prompt")
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
+        let trusted = AXIsProcessTrustedWithOptions(options)
+        logger.info("Accessibility trusted: \(trusted)")
+        return trusted
     }
-
+    
     @discardableResult
     static func requestInputMonitoringPrompt() -> Bool {
-        logger.info("Requesting Input Monitoring prompt")
-        return CGRequestListenEventAccess()
+        let granted = CGRequestListenEventAccess()
+        logger.info("Input Monitoring granted: \(granted)")
+        return granted
     }
-
-    static func requestAllPermissions() {
+    
+    static func requestMissingPermissionsOnLaunch() {
+        // These APIs ask macOS to request access; neither API can override a
+        // previous denial or guarantee a prompt appears every time.
         if !hasAccessibility {
-            requestAccessibilityPrompt()
+            _ = requestAccessibilityPrompt()
         }
         if !hasInputMonitoring {
-            requestInputMonitoringPrompt()
+            _ = requestInputMonitoringPrompt()
         }
     }
-
+    
     static func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+        openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
-
+    
     static func openInputMonitoringSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
-        }
+        openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
     }
-
+    
     static func openGeneralPrivacySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
-            NSWorkspace.shared.open(url)
-        }
+        openSettings("x-apple.systempreferences:com.apple.preference.security")
+    }
+    
+    private static func openSettings(_ rawURL: String) {
+        guard let url = URL(string: rawURL) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
-

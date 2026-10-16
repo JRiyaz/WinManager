@@ -6,86 +6,72 @@
 //
 
 import AppKit
+import CoreGraphics
 import os
 
 final class QuitProtectionManager {
     private let logger = Logger(subsystem: "com.riyazjpersonalteam.WinManager", category: "QuitProtection")
     private var holdTimer: Timer?
-    private var isHolding = false
-
+    private var isHoldingCommandQ = false
+    
     func handleKeyEvent(_ event: CGEvent, type: CGEventType) -> CGEvent? {
         guard UserDefaults.standard.bool(forKey: "enableQuitProtection") else { return event }
-
-        // Ignore our own synthetic quit events
-        if event.getIntegerValueField(.eventSourceUserData) == EventTapController.syntheticEventTag {
+        guard event.getIntegerValueField(.eventSourceUserData) != EventTapController.syntheticEventTag else {
             return event
         }
-
+        
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags = event.flags
-
-        // ⌘Q (virtual key 12)
-        if keyCode == 12, flags.contains(.maskCommand) {
-            if type == .keyDown {
-                // If this is a key-repeat event while already holding, just swallow it
-                if isHolding {
-                    return nil
-                }
-
-                isHolding = true
-                logger.info("Cmd+Q pressed. Starting 1-second hold timer.")
-
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.holdTimer?.invalidate()
-                    self.holdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
-                        guard let self, self.isHolding else { return }
-                        self.logger.notice("Cmd+Q held for 1.0s. Posting synthetic quit event.")
-                        self.postSyntheticQuit()
-                        self.cancelHold()
-                    }
-                }
-                return nil // Swallow the initial key-down
-            } else if type == .keyUp {
-                if isHolding {
-                    logger.info("Q key released before 1.0s. Cancelling quit.")
-                    cancelHold()
-                    return nil // Swallow keyUp since corresponding keyDown was swallowed
+        let commandIsDown = event.flags.contains(.maskCommand)
+        
+        guard keyCode == 12 else { return event } // Q key
+        
+        if type == .keyDown, commandIsDown {
+            if !isHoldingCommandQ {
+                isHoldingCommandQ = true
+                holdTimer?.invalidate()
+                logger.debug("⌘Q pressed; waiting for a one-second hold")
+                holdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                    guard let self, self.isHoldingCommandQ else { return }
+                    self.postSyntheticQuit()
+                    self.cancelPendingAction()
                 }
             }
+            // Swallow both the initial key-down and key repeat events.
+            return nil
         }
-
+        
+        if type == .keyUp, isHoldingCommandQ {
+            cancelPendingAction()
+            return nil
+        }
+        
         return event
     }
-
+    
     func handleFlagsChanged(_ event: CGEvent) {
-        // If the Command key modifier is released while holding Q, cancel the quit timer
-        if isHolding, !event.flags.contains(.maskCommand) {
-            logger.info("Command modifier released before 1.0s. Cancelling quit.")
-            cancelHold()
+        if isHoldingCommandQ, !event.flags.contains(.maskCommand) {
+            logger.debug("Command released before hold duration; cancelling ⌘Q")
+            cancelPendingAction()
         }
     }
-
-    func cancelHold() {
-        isHolding = false
+    
+    func cancelPendingAction() {
+        isHoldingCommandQ = false
         holdTimer?.invalidate()
         holdTimer = nil
     }
-
+    
     private func postSyntheticQuit() {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
-
-        if let quitDown = CGEvent(keyboardEventSource: source, virtualKey: 12, keyDown: true) {
-            quitDown.flags = .maskCommand
-            quitDown.setIntegerValueField(.eventSourceUserData, value: EventTapController.syntheticEventTag)
-            quitDown.post(tap: .cgSessionEventTap)
-        }
-
-        if let quitUp = CGEvent(keyboardEventSource: source, virtualKey: 12, keyDown: false) {
-            quitUp.flags = .maskCommand
-            quitUp.setIntegerValueField(.eventSourceUserData, value: EventTapController.syntheticEventTag)
-            quitUp.post(tap: .cgSessionEventTap)
-        }
+        postKey(keyCode: 12, down: true, flags: .maskCommand, source: source)
+        postKey(keyCode: 12, down: false, flags: .maskCommand, source: source)
+        logger.info("⌘Q hold completed; posted a tagged quit shortcut")
+    }
+    
+    private func postKey(keyCode: CGKeyCode, down: Bool, flags: CGEventFlags, source: CGEventSource) {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: down) else { return }
+        event.flags = flags
+        event.setIntegerValueField(.eventSourceUserData, value: EventTapController.syntheticEventTag)
+        event.post(tap: .cgSessionEventTap)
     }
 }
-

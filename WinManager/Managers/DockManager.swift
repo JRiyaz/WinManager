@@ -7,127 +7,160 @@
 
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import os
 
 final class DockManager {
     private let logger = Logger(subsystem: "com.riyazjpersonalteam.WinManager", category: "Dock")
-    private let systemWide = AXUIElementCreateSystemWide()
+    private let systemWide: AXUIElement = {
+        let element = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        return element
+    }()
     private var cachedDockPID: pid_t?
-
+    
     private var dockPID: pid_t? {
-        if let cached = cachedDockPID,
-           let app = NSRunningApplication(processIdentifier: cached),
+        if let cachedDockPID,
+           let app = NSRunningApplication(processIdentifier: cachedDockPID),
            !app.isTerminated {
-            return cached
+            return cachedDockPID
         }
-        let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
-        cachedDockPID = dock?.processIdentifier
+        cachedDockPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
         return cachedDockPID
     }
-
+    
+    /// Returns true only when the click belongs to the Dock item for the app
+    /// that is already frontmost and a window was successfully minimized.
     func handleMouseDown(_ event: CGEvent) -> Bool {
         guard PermissionsManager.hasAccessibility else { return false }
-
+        guard isNearDockRegion(NSEvent.mouseLocation) else { return false }
+        guard let targetDockPID = dockPID else { return false }
+        
         let point = event.location
-
-        // 1. Cheap geometric pre-filter: Check if point is near any screen edge (Dock region).
-        // If the click is in the middle of a screen, avoid expensive Accessibility queries entirely.
-        guard isPointNearScreenEdge(point) else {
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element) == .success,
+              var candidate = element else {
             return false
         }
-
-        // 2. Fast check: Identify the UI element under cursor and verify it belongs to Dock PID
-        guard let targetDockPID = dockPID else { return false }
-
-        var element: AXUIElement?
-        let result = AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element)
-        guard result == .success, var candidate = element else { return false }
-
+        
         var clickedPID: pid_t = 0
-        guard AXUIElementGetPid(candidate, &clickedPID) == .success, clickedPID == targetDockPID else {
-            return false // Element does not belong to the Dock
+        guard AXUIElementGetPid(candidate, &clickedPID) == .success,
+              clickedPID == targetDockPID,
+              let frontmost = NSWorkspace.shared.frontmostApplication else {
+            return false
         }
-
-        // 3. Bounded traversal to find the clicked application icon
-        guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
-
+        
         for _ in 0..<4 {
-            if let app = application(for: candidate), app.processIdentifier == frontmost.processIdentifier {
-                logger.info("Dock click on frontmost app (\(app.localizedName ?? "app")). Minimizing.")
-                return minimizeFrontmostApplication()
+            AXUIElementSetMessagingTimeout(candidate, 0.1)
+            if let clickedApplication = application(for: candidate),
+               clickedApplication.processIdentifier == frontmost.processIdentifier {
+                let didMinimize = minimizeFrontmostApplication(frontmost)
+                if didMinimize {
+                    logger.debug("Minimized frontmost app after its Dock icon was clicked")
+                }
+                return didMinimize
             }
-
+            
             var parentValue: CFTypeRef?
             guard AXUIElementCopyAttributeValue(candidate, kAXParentAttribute as CFString, &parentValue) == .success,
-                  let parent = parentValue,
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
-            candidate = (parent as! AXUIElement)
+                  let parentValue,
+                  CFGetTypeID(parentValue) == AXUIElementGetTypeID() else {
+                break
+            }
+            candidate = parentValue as! AXUIElement
         }
-
+        
         return false
     }
-
-    private func isPointNearScreenEdge(_ point: CGPoint) -> Bool {
-        let margin: CGFloat = 120.0
+    
+    private func isNearDockRegion(_ point: NSPoint) -> Bool {
+        let margin: CGFloat = 100
         for screen in NSScreen.screens {
             let frame = screen.frame
-            // Check if point is near bottom, left, or right edges of the display
-            let inBottom = point.y <= frame.minY + margin
-            let inLeft = point.x <= frame.minX + margin
-            let inRight = point.x >= frame.maxX - margin
-            if frame.contains(point) && (inBottom || inLeft || inRight) {
+            guard frame.contains(point) else { continue }
+            if point.y <= frame.minY + margin ||
+                point.x <= frame.minX + margin ||
+                point.x >= frame.maxX - margin {
                 return true
             }
         }
         return false
     }
-
+    
     private func application(for element: AXUIElement) -> NSRunningApplication? {
-        for attribute in [kAXURLAttribute, kAXTitleAttribute, kAXDescriptionAttribute] {
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
-                  let string = value as? String, !string.isEmpty else { continue }
-
-            if attribute == kAXURLAttribute,
-               let url = URL(string: string),
-               let bundleID = Bundle(url: url)?.bundleIdentifier,
+        var urlValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXURLAttribute as CFString, &urlValue) == .success,
+           let urlValue {
+            let url: URL?
+            if let bridgedURL = urlValue as? URL {
+                url = bridgedURL
+            } else if let string = urlValue as? String {
+                url = URL(string: string)
+            } else {
+                url = nil
+            }
+            
+            if let url, let bundleID = Bundle(url: url)?.bundleIdentifier,
                let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
                 return app
             }
-
+        }
+        
+        for attribute in [kAXTitleAttribute, kAXDescriptionAttribute] {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+                  let title = value as? String,
+                  !title.isEmpty else {
+                continue
+            }
+            
             if let app = NSWorkspace.shared.runningApplications.first(where: {
-                ($0.localizedName ?? "").localizedCaseInsensitiveCompare(string) == .orderedSame
+                ($0.localizedName ?? "").localizedCaseInsensitiveCompare(title) == .orderedSame
             }) {
                 return app
             }
         }
+        
         return nil
     }
-
-    private func minimizeFrontmostApplication() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+    
+    private func minimizeFrontmostApplication(_ app: NSRunningApplication) -> Bool {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(appElement, 0.1)
         var windowsValue: CFTypeRef?
-
         guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-              let windows = windowsValue as? [AXUIElement],
-              let window = windows.first else {
-            // Fallback: hide the application if no windows can be directly minimized
-            app.hide()
-            return true
-        }
-
-        var isMinimized: CFTypeRef?
-        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &isMinimized) == .success,
-           let minimized = isMinimized as? Bool, minimized == true {
+              let windows = windowsValue as? [AXUIElement] else {
+            // Do not silently convert a failed minimize into Hide; keep Dock's
+            // native behavior whenever we cannot prove a minimize succeeded.
             return false
         }
-
-        let setResult = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
-        if setResult != .success {
-            app.hide()
+        
+        for window in windows {
+            AXUIElementSetMessagingTimeout(window, 0.1)
+            var subroleValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleValue) == .success,
+                  (subroleValue as? String) == (kAXStandardWindowSubrole as String) else {
+                continue
+            }
+            
+            var settable = DarwinBoolean(false)
+            guard AXUIElementIsAttributeSettable(window, kAXMinimizedAttribute as CFString, &settable) == .success,
+                  settable.boolValue else {
+                continue
+            }
+            
+            var isMinimizedValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &isMinimizedValue) == .success,
+               let isMinimized = isMinimizedValue as? Bool,
+               isMinimized {
+                // Clicking a minimized app should restore it using the native Dock action.
+                return false
+            }
+            
+            if AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success {
+                return true
+            }
         }
-        return true
+        return false
     }
 }
-
