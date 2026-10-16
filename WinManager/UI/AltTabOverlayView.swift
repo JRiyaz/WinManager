@@ -1,8 +1,8 @@
 import AppKit
 import Combine
 
-/// AppKit-only app switcher surface. Keeping this view out of SwiftUI avoids nested
-/// NSHostingView/ScrollView layout passes while the global hotkey rapidly changes selection.
+/// AppKit-only custom app switcher styled to resemble the system switcher.
+/// macOS does not expose a public API for modifying Apple's actual switcher UI.
 final class AltTabOverlayView: NSVisualEffectView {
     private let model: SwitcherViewModel
     private let scrollView = NSScrollView()
@@ -11,10 +11,10 @@ final class AltTabOverlayView: NSVisualEffectView {
     private var itemOrder: [pid_t] = []
     private var cancellables = Set<AnyCancellable>()
     
-    private let cellSize = NSSize(width: 78, height: 78)
-    private let cellSpacing: CGFloat = 2
+    static let cellSize = NSSize(width: 140, height: 145)
+    static let cellSpacing: CGFloat = 12
     private let horizontalInset: CGFloat = 10
-    private let verticalInset: CGFloat = 8
+    private let verticalInset: CGFloat = 5
     
     init(frame: NSRect, model: SwitcherViewModel) {
         self.model = model
@@ -34,10 +34,10 @@ final class AltTabOverlayView: NSVisualEffectView {
         blendingMode = .behindWindow
         state = .active
         wantsLayer = true
-        layer?.cornerRadius = 18
+        layer?.cornerRadius = 22
         layer?.masksToBounds = true
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.20).cgColor
         setAccessibilityLabel("Win Manager App Switcher")
     }
     
@@ -57,40 +57,29 @@ final class AltTabOverlayView: NSVisualEffectView {
     private func bindModel() {
         model.$items
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.rebuildCells()
-            }
+            .sink { [weak self] _ in self?.rebuildCells() }
             .store(in: &cancellables)
         
         model.$selectedIndex
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateSelection(scrollToSelectedCell: true)
-            }
+            .sink { [weak self] _ in self?.updateSelection(scrollToSelectedCell: true) }
             .store(in: &cancellables)
     }
     
     override func layout() {
         super.layout()
-        
         let targetFrame = bounds.insetBy(dx: horizontalInset, dy: verticalInset)
-        if scrollView.frame != targetFrame {
-            scrollView.frame = targetFrame
-        }
+        if scrollView.frame != targetFrame { scrollView.frame = targetFrame }
         layoutCells()
     }
     
     private func rebuildCells() {
-        // Preserve the model's process-ID identity; do not create a new SwiftUI tree for
-        // every key press or selected-index change.
-        for cell in cellsByPID.values {
-            cell.removeFromSuperview()
-        }
+        for cell in cellsByPID.values { cell.removeFromSuperview() }
         cellsByPID.removeAll(keepingCapacity: true)
         itemOrder = model.items.map(\.id)
         
         for item in model.items {
-            let cell = SwitcherIconCell(item: item, size: cellSize)
+            let cell = SwitcherIconCell(item: item, size: Self.cellSize)
             documentView.addSubview(cell)
             cellsByPID[item.id] = cell
         }
@@ -102,47 +91,39 @@ final class AltTabOverlayView: NSVisualEffectView {
     private func layoutCells() {
         let viewportSize = scrollView.contentSize
         let count = itemOrder.count
-        let stripWidth = CGFloat(count) * cellSize.width
-        + CGFloat(max(0, count - 1)) * cellSpacing
-        + horizontalInset * 2
+        // The scroll view already provides the outer insets; the document view
+        // should contain only the icon strip, otherwise it scrolls unnecessarily.
+        let stripWidth = CGFloat(count) * Self.cellSize.width
+        + CGFloat(max(0, count - 1)) * Self.cellSpacing
         let documentWidth = max(viewportSize.width, stripWidth)
-        let documentHeight = max(viewportSize.height, cellSize.height)
+        let documentHeight = max(viewportSize.height, Self.cellSize.height)
         let targetDocumentFrame = NSRect(x: 0, y: 0, width: documentWidth, height: documentHeight)
+        if documentView.frame != targetDocumentFrame { documentView.frame = targetDocumentFrame }
         
-        if documentView.frame != targetDocumentFrame {
-            documentView.frame = targetDocumentFrame
-        }
-        
-        let originY = floor((documentHeight - cellSize.height) / 2)
+        let originY = floor((documentHeight - Self.cellSize.height) / 2)
         for (index, pid) in itemOrder.enumerated() {
             guard let cell = cellsByPID[pid] else { continue }
-            let x = horizontalInset + CGFloat(index) * (cellSize.width + cellSpacing)
-            let targetFrame = NSRect(origin: NSPoint(x: x, y: originY), size: cellSize)
-            if cell.frame != targetFrame {
-                cell.frame = targetFrame
-            }
+            let x = CGFloat(index) * (Self.cellSize.width + Self.cellSpacing)
+            let targetFrame = NSRect(origin: NSPoint(x: x, y: originY), size: Self.cellSize)
+            if cell.frame != targetFrame { cell.frame = targetFrame }
         }
     }
     
     private func updateSelection(scrollToSelectedCell: Bool) {
         guard !itemOrder.isEmpty else { return }
-        
         for (index, pid) in itemOrder.enumerated() {
             cellsByPID[pid]?.isSelected = index == model.selectedIndex
         }
         
         guard scrollToSelectedCell,
               model.items.indices.contains(model.selectedIndex),
-              let selectedCell = cellsByPID[model.items[model.selectedIndex].id] else {
-            return
-        }
+              let selectedCell = cellsByPID[model.items[model.selectedIndex].id] else { return }
         
-        // Move only the clip view's origin. This avoids forcing an immediate recursive
-        // layout pass via layoutSubtreeIfNeeded while AppKit is laying out the panel.
+        // Scroll the clip view directly; avoid forcing a recursive layout pass.
         let visibleRect = scrollView.contentView.bounds
         let cellRect = selectedCell.frame
         var targetX = visibleRect.origin.x
-        let margin: CGFloat = 4
+        let margin: CGFloat = 8
         
         if cellRect.minX < visibleRect.minX + margin {
             targetX = cellRect.minX - margin
@@ -159,9 +140,11 @@ final class AltTabOverlayView: NSVisualEffectView {
     }
 }
 
-/// A compact icon-only tile similar to the built-in macOS app switcher.
+/// App icon tile. The selected app's name appears under the icon, like the system switcher.
 private final class SwitcherIconCell: NSView {
     private let imageView = NSImageView()
+    private let selectionBackdrop = NSView()
+    private let nameLabel = NSTextField(labelWithString: "")
     private let appName: String
     var isSelected = false {
         didSet { updateSelectionAppearance() }
@@ -170,22 +153,52 @@ private final class SwitcherIconCell: NSView {
     init(item: SwitcherItem, size: NSSize) {
         appName = item.name
         super.init(frame: NSRect(origin: .zero, size: size))
-        
         wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.masksToBounds = true
+        
+        // Tighter selection highlight around the app icon.
+        selectionBackdrop.frame = NSRect(
+            x: 16,
+            y: 28,
+            width: size.width - 32,
+            height: 90
+        )
+        
+        selectionBackdrop.wantsLayer = true
+        selectionBackdrop.layer?.cornerRadius = 18
+        selectionBackdrop.layer?.masksToBounds = true
+        
+        addSubview(
+            selectionBackdrop,
+            positioned: .below,
+            relativeTo: nil
+        )
+        
+        // Slightly smaller icon with balanced padding.
+        let iconSize: CGFloat = 78
         
         imageView.image = item.icon
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.frame = NSRect(
-            x: floor((size.width - 58) / 2),
-            y: floor((size.height - 58) / 2),
-            width: 58,
-            height: 58
+            x: floor((size.width - iconSize) / 2),
+            y: 34,
+            width: iconSize,
+            height: iconSize
         )
+        
         imageView.animates = false
         imageView.setAccessibilityElement(false)
         addSubview(imageView)
+        
+        nameLabel.stringValue = appName
+        nameLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        nameLabel.textColor = .white
+        nameLabel.alignment = .center
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.maximumNumberOfLines = 1
+        nameLabel.frame = NSRect(x: 4, y: 5, width: size.width - 8, height: 19)
+        nameLabel.isHidden = true
+        nameLabel.setAccessibilityElement(false)
+        addSubview(nameLabel)
         
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
@@ -201,14 +214,16 @@ private final class SwitcherIconCell: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
     
     private func updateSelectionAppearance() {
+        selectionBackdrop.isHidden = !isSelected
+        nameLabel.isHidden = !isSelected
         if isSelected {
-            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
-            layer?.borderColor = NSColor.white.withAlphaComponent(0.88).cgColor
-            layer?.borderWidth = 1.25
+            selectionBackdrop.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            selectionBackdrop.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            selectionBackdrop.layer?.borderWidth = 1
         } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-            layer?.borderColor = NSColor.clear.cgColor
-            layer?.borderWidth = 0
+            selectionBackdrop.layer?.backgroundColor = NSColor.clear.cgColor
+            selectionBackdrop.layer?.borderColor = NSColor.clear.cgColor
+            selectionBackdrop.layer?.borderWidth = 0
         }
     }
 }

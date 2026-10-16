@@ -137,11 +137,13 @@ final class SwitcherManager {
         let visible = (screen ?? NSScreen.main)?.visibleFrame ??
         NSRect(x: 0, y: 0, width: 1024, height: 768)
         
-        // The built-in switcher is icon-only. Use a compact HUD plate with no labels;
-        // the custom view scrolls the selected icon into view if many apps are running.
-        let desiredWidth = CGFloat(model.items.count) * 80 + 40
-        let width = min(max(136, desiredWidth), max(136, visible.width - 32))
-        let height: CGFloat = 100
+        // Keep the custom HUD compact while allowing the icon strip to scroll for large app lists.
+        let itemCount = CGFloat(model.items.count)
+        let desiredWidth = itemCount * AltTabOverlayView.cellSize.width
+        + CGFloat(max(0, model.items.count - 1)) * AltTabOverlayView.cellSpacing
+        + 36 // 18 pt outer inset on each side
+        let width = min(max(280, desiredWidth), max(280, visible.width - 32))
+        let height: CGFloat = 172
         
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
