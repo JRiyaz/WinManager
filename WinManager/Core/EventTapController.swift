@@ -8,26 +8,18 @@
 import AppKit
 import ApplicationServices
 
-/// Owns one session-level event tap. Keep callback work minimal.
 final class EventTapController {
     var onScroll: ((CGEvent) -> CGEvent?)?
-    /// Return true to consume the system event. `reverse` is true for Cmd+Shift+Tab.
+    var onKeyDown: ((CGEvent, CGEventType) -> CGEvent?)?
     var onHotkey: ((Bool) -> Bool)?
-    /// Triggered when the Command modifier is released.
     var onModifierReleased: (() -> Void)?
-    /// Return true to consume a left mouse-down event.
     var onMouseDown: ((CGEvent) -> Bool)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private let lock = NSLock()
 
     func start() {
-        guard eventTap == nil else { return }
-        guard PermissionsManager.hasInputMonitoring else {
-            _ = PermissionsManager.requestInputMonitoringPrompt()
-            return
-        }
+        guard eventTap == nil, PermissionsManager.hasInputMonitoring else { return }
 
         let mask = (CGEventMask(1) << CGEventType.scrollWheel.rawValue)
             | (CGEventMask(1) << CGEventType.keyDown.rawValue)
@@ -46,31 +38,38 @@ final class EventTapController {
 
             switch type {
             case .scrollWheel:
-                guard UserDefaults.standard.bool(forKey: "enableScrollReverse"),
-                      let changed = controller.onScroll?(event) else {
-                    return Unmanaged.passUnretained(event)
-                }
-                return Unmanaged.passUnretained(changed)
+                let modifiedEvent = controller.onScroll?(event) ?? event
+                return Unmanaged.passUnretained(modifiedEvent)
 
             case .leftMouseDown:
-                if UserDefaults.standard.bool(forKey: "enableDockClick"),
+                if UserDefaults.standard.bool(forKey: "enableDockClicks"),
                    controller.onMouseDown?(event) == true {
                     return nil
                 }
                 return Unmanaged.passUnretained(event)
 
-            case .keyDown:
-                // keyCode 48 is Tab. Command modifier is required.
-                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-                let flags = event.flags
-                if keyCode == 48, flags.contains(.maskCommand) {
-                    let reverse = flags.contains(.maskShift)
-                    if UserDefaults.standard.bool(forKey: "enableAltTab"),
-                       controller.onHotkey?(reverse) == true {
-                        return nil
+            case .keyDown, .keyUp:
+                var currentEvent: CGEvent? = event
+                
+                // 1. Route to background utilities (Cmd+X, Quit Protection)
+                if let handler = controller.onKeyDown {
+                    currentEvent = handler(currentEvent!, type)
+                }
+                guard let finalEvent = currentEvent else { return nil } // Event swallowed by a utility
+                
+                // 2. Route to App Switcher
+                if type == .keyDown {
+                    let keyCode = finalEvent.getIntegerValueField(.keyboardEventKeycode)
+                    let flags = finalEvent.flags
+                    if keyCode == 48, flags.contains(.maskCommand) {
+                        let reverse = flags.contains(.maskShift)
+                        if UserDefaults.standard.bool(forKey: "enableAppSwitcher"),
+                           controller.onHotkey?(reverse) == true {
+                            return nil
+                        }
                     }
                 }
-                return Unmanaged.passUnretained(event)
+                return Unmanaged.passUnretained(finalEvent)
 
             case .flagsChanged:
                 let flags = event.flags
@@ -86,18 +85,13 @@ final class EventTapController {
 
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: callback,
-            userInfo: userInfo
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: mask, callback: callback, userInfo: userInfo
         ) else {
-            // This will tell us if macOS is still killing the request
-            print("🚨 FATAL: Event Tap blocked. macOS refused permission or Sandbox is still active.")
+            print("🚨 FATAL: Event Tap blocked by macOS.")
             return
         }
-        print("✅ Event Tap successfully created and active!")
+        
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         if let runLoopSource {
@@ -107,19 +101,13 @@ final class EventTapController {
     }
 
     func stop() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        if let eventTap {
-            CFMachPortInvalidate(eventTap)
-        }
+        if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        if let eventTap { CFMachPortInvalidate(eventTap) }
         runLoopSource = nil
         eventTap = nil
     }
 
     fileprivate func reenableTap() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: true)
-        }
+        if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
     }
 }

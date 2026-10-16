@@ -6,39 +6,70 @@
 //
 
 import AppKit
-
-enum Feature: String {
-    case switcher
-    case scrollReverse
-    case dockMinimize
-    case autoQuit
-}
+import Combine
 
 final class FeatureController {
     private let eventTapController = EventTapController()
-    private let scrollManager = ScrollManager()
+    
+    // UI-based Managers
     private let switcherManager = SwitcherManager()
     private let dockManager = DockManager()
     private let windowCloseManager = WindowCloseManager()
+    
+    // Background Utilities (Separated into files)
+    private let scrollReverseManager = ScrollReverseManager()
+    private let quitProtectionManager = QuitProtectionManager()
+    private let commandXManager = CommandXManager()
+    
+    private var cancellables = Set<AnyCancellable>()
 
-    func start() {
+    init() {
         eventTapController.onScroll = { [weak self] event in
-            self?.scrollManager.transform(event) ?? event
+            return self?.scrollReverseManager.handleEvent(event) ?? event
         }
+        
+        eventTapController.onKeyDown = { [weak self] event, type in
+            guard let self = self else { return event }
+            var modified = event
+            
+            // Route through Quit Protection
+            if let e = self.quitProtectionManager.handleEvent(modified, type: type) { modified = e } else { return nil }
+            // Route through Command X
+            if let e = self.commandXManager.handleEvent(modified, type: type) { modified = e } else { return nil }
+            
+            return modified
+        }
+        
         eventTapController.onHotkey = { [weak self] reverse in
-            guard UserDefaults.standard.bool(forKey: "enableAltTab") else { return false }
             self?.switcherManager.handleSwitchHotkey(reverse: reverse)
             return true
         }
+        
         eventTapController.onModifierReleased = { [weak self] in
             self?.switcherManager.executeSwitch()
         }
+        
         eventTapController.onMouseDown = { [weak self] event in
-            guard UserDefaults.standard.bool(forKey: "enableDockClick") else { return false }
             return self?.dockManager.handleMouseDown(event) ?? false
         }
+        
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in self?.evaluateState() }
+            .store(in: &cancellables)
+    }
+
+    func start() {
+        UserDefaults.standard.register(defaults: [
+            "enableAppSwitcher": false,
+            "enableScrollReverse": true,
+            "enableDockClicks": true,
+            "enableAutoQuit": true,
+            "enableQuitProtection": true,
+            "enableCommandX": true
+        ])
+        
         eventTapController.start()
-        windowCloseManager.start()
+        evaluateState()
     }
 
     func stop() {
@@ -47,12 +78,15 @@ final class FeatureController {
         switcherManager.dismiss()
     }
 
-    func setEnabled(_ enabled: Bool, for feature: Feature) {
-        switch feature {
-        case .switcher:
-            if !enabled { switcherManager.dismiss() }
-        case .scrollReverse, .dockMinimize, .autoQuit:
-            break
+    private func evaluateState() {
+        if UserDefaults.standard.bool(forKey: "enableAutoQuit") {
+            windowCloseManager.start()
+        } else {
+            windowCloseManager.stop()
+        }
+        
+        if !UserDefaults.standard.bool(forKey: "enableAppSwitcher") {
+            switcherManager.dismiss()
         }
     }
 }

@@ -36,28 +36,18 @@ final class SwitcherManager {
     }
     
     func executeSwitch() {
-            guard isShowing, !items.isEmpty else { return }
-            let selectedApp = items[selectedIndex].app
-            
-            // 1. Unhide the app if it was hidden
-            selectedApp.unhide()
-            
-            // 2. Activate the process
-            selectedApp.activate()
-            
-            // 3. Force un-minimize its main windows via Accessibility
-            let appElement = AXUIElementCreateApplication(selectedApp.processIdentifier)
-            var windowsValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-               let windows = windowsValue as? [AXUIElement] {
-                for window in windows {
-                    AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                }
-            }
-            
-            dismiss()
+        guard isShowing, !items.isEmpty else { return }
+        let selectedApp = items[selectedIndex].app
+        
+        // Bypasses the broken AXUIElement un-minimize and forces macOS to launch/focus the app natively
+        if let url = selectedApp.bundleURL {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
         }
+        
+        dismiss()
+    }
 
     func dismiss() {
         panel?.orderOut(nil)
@@ -68,14 +58,12 @@ final class SwitcherManager {
         items = NSWorkspace.shared.runningApplications
             .filter {
                 !$0.isTerminated &&
-                !$0.isHidden &&
                 $0.activationPolicy == .regular &&
                 $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
             }
             .sorted {
                 ($0.localizedName ?? "").localizedCaseInsensitiveCompare($1.localizedName ?? "") == .orderedAscending
             }
-            // Map the NSRunningApplication objects to SwitcherItem structs
             .map { SwitcherItem(id: $0.processIdentifier, app: $0) }
     }
 
