@@ -2,9 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Privacy - Accessibility Usage Description</key>
-	<string>Needed to minimize windows</string>
-	<key>Privacy - Input Monitoring Usage Description</key>
-	<string>Needed to intercept Alt+Tab and scroll events</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>WinManager requires Input Monitoring to provide smooth Alt+Tab switching, external mouse scroll reversal, and shortcut handling.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>WinManager requires automation permissions to coordinate window states.</string>
 </dict>
 </plist>
+
