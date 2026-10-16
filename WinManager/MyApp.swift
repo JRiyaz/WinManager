@@ -1,53 +1,86 @@
-//
-//  MyApp.swift
-//  WinManager
-//
-//  Created by Riyaz J on 16-10-2026.
-//
-
 import AppKit
 import SwiftUI
 
 @main
 struct MyApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
-    @AppStorage("enableAltTab") private var enableAltTab = true
+    @NSApplicationDelegateAdaptor(AppDelegate.self)
+    private var appDelegate: AppDelegate
+    
+    @AppStorage("enableAutoQuit") private var enableAutoQuit = true
     @AppStorage("enableScrollReverse") private var enableScrollReverse = true
+    @AppStorage("enableCommandX") private var enableCommandX = true
     @AppStorage("enableDockClick") private var enableDockClick = true
-    @AppStorage("enableAutoQuit") private var enableAutoQuit = false
-
+    @AppStorage("enableAltTab") private var enableAltTab = true
+    @AppStorage("enableCleaningMode") private var enableCleaningMode = false
+    
+    /// A monochrome template version of the Win Manager mark for the menu bar.
+    /// MenuBarIcon is kept separate from the full-color square application icon so it
+    /// remains legible in both light and dark menu-bar appearances.
+    private var statusIcon: NSImage {
+        let image = NSImage(named: NSImage.Name("MenuBarIcon"))
+        ?? NSImage(systemSymbolName: "command.square", accessibilityDescription: "Win Manager")
+        ?? NSImage()
+        image.isTemplate = true
+        image.size = NSSize(width: 18, height: 12)
+        return image
+    }
+    
     var body: some Scene {
-        MenuBarExtra("WinManager", systemImage: "command.square") {
-            Toggle("Windows-style Cmd + Tab", isOn: $enableAltTab)
-                .onChange(of: enableAltTab) { _, value in
-                    appDelegate.featureController.setEnabled(value, for: .switcher)
-                }
-
-            Toggle("Reverse external mouse scrolling", isOn: $enableScrollReverse)
-                .onChange(of: enableScrollReverse) { _, value in
-                    appDelegate.featureController.setEnabled(value, for: .scrollReverse)
-                }
-
-            Toggle("Dock click to minimize", isOn: $enableDockClick)
-                .onChange(of: enableDockClick) { _, value in
-                    appDelegate.featureController.setEnabled(value, for: .dockMinimize)
-                }
-
-            Toggle("Quit app when last window closes", isOn: $enableAutoQuit)
-                .onChange(of: enableAutoQuit) { _, value in
-                    appDelegate.featureController.setEnabled(value, for: .autoQuit)
-                }
-
+        MenuBarExtra {
+            Label {
+                Text("Win Manager")
+            } icon: {
+                Image(nsImage: statusIcon)
+                    .renderingMode(.template)
+            }
+            .font(.headline)
+            .disabled(true)
+            
+            // Divider 1: app name and features.
             Divider()
-
-            Button("Open Privacy Settings…") {
+            
+            Toggle("Quit on Close", isOn: $enableAutoQuit)
+            Toggle("Scroll Reverse", isOn: $enableScrollReverse)
+            Toggle("Cut & Paste (⌘X)", isOn: $enableCommandX)
+            Toggle("Dock Clicks", isOn: $enableDockClick)
+            Toggle("App Switcher", isOn: $enableAltTab)
+            
+            Button(enableCleaningMode ? "Stop Clean Mode" : "Clean Mode…") {
+                if enableCleaningMode {
+                    appDelegate.featureController.disableCleaningMode()
+                    return
+                }
+                
+                let alert = NSAlert()
+                alert.messageText = "Enable Clean Mode?"
+                alert.informativeText = """
+                Keyboard input will be blocked for 60 seconds. Mouse input stays available.
+                You can turn Clean Mode off from the Win Manager menu.
+                """
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Enable for 60 Seconds")
+                alert.addButton(withTitle: "Cancel")
+                
+                if alert.runModal() == .alertFirstButtonReturn {
+                    appDelegate.featureController.enableCleaningMode(duration: 60)
+                }
+            }
+            .disabled(!PermissionsManager.hasInputMonitoring)
+            
+            // Divider 2: features and privacy/quit actions.
+            Divider()
+            
+            Button("Privacy & Security…") {
                 PermissionsManager.openPrivacySettings()
             }
-
-            Button("Quit WinManager") {
+            
+            Button("Quit Win Manager") {
                 NSApplication.shared.terminate(nil)
             }
+        } label: {
+            Image(nsImage: statusIcon)
+                .renderingMode(.template)
+                .accessibilityLabel("Win Manager")
         }
         .menuBarExtraStyle(.menu)
     }
@@ -55,28 +88,67 @@ struct MyApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let featureController = FeatureController()
-
+    private var workspaceObserver: NSObjectProtocol?
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         
-        // FIX: Register the default values so the background managers can read them
-        UserDefaults.standard.register(defaults: [
-            "enableAltTab": true,
+        let defaults = UserDefaults.standard
+        
+        // One-time migration: the requested product defaults are to enable every feature
+        // except Clean Mode. Existing installs receive those defaults once on this revision;
+        // after this migration, the user's menu toggles are respected across launches.
+        let defaultsMigrationKey = "winManagerFeatureDefaultsMigrationVersion"
+        if defaults.integer(forKey: defaultsMigrationKey) < 1 {
+            defaults.set(true, forKey: "enableAutoQuit")
+            defaults.set(true, forKey: "enableScrollReverse")
+            defaults.set(true, forKey: "enableCommandX")
+            defaults.set(true, forKey: "enableDockClick")
+            defaults.set(true, forKey: "enableAltTab")
+            defaults.set(false, forKey: "enableCleaningMode")
+            defaults.set(1, forKey: defaultsMigrationKey)
+        }
+        
+        // Migrate old Dock setting name to the single key used by this source set.
+        if defaults.object(forKey: "enableDockClick") == nil,
+           let oldValue = defaults.object(forKey: "enableDockClicks") as? Bool {
+            defaults.set(oldValue, forKey: "enableDockClick")
+        }
+        
+        defaults.register(defaults: [
+            "enableAutoQuit": true,
             "enableScrollReverse": true,
+            "enableCommandX": true,
             "enableDockClick": true,
-            "enableAutoQuit": false
+            "enableAltTab": true,
+            "enableCleaningMode": false
         ])
         
-        let axTrusted = PermissionsManager.hasAccessibility
-        let imTrusted = PermissionsManager.hasInputMonitoring
-        print("🚨 DIAGNOSTIC -> Accessibility: \(axTrusted) | Input: \(imTrusted)")
-        
-        if !axTrusted { PermissionsManager.requestAccessibilityPrompt() }
+        // Ask once at launch if either permission is missing. The menu's privacy
+        // action remains available if the user dismisses or later revokes access.
+        if !PermissionsManager.hasAccessibility {
+            _ = PermissionsManager.requestAccessibilityPrompt()
+        }
+        if !PermissionsManager.hasInputMonitoring {
+            _ = PermissionsManager.requestInputMonitoringPrompt()
+        }
         
         featureController.start()
+        
+        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.featureController.refreshPermissions()
+        }
     }
-
+    
     func applicationWillTerminate(_ notification: Notification) {
+        if let workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
+            self.workspaceObserver = nil
+        }
         featureController.stop()
     }
 }

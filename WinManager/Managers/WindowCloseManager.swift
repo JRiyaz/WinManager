@@ -1,23 +1,24 @@
-//
-//  WindowCloseManager.swift
-//  WinManager
-//
-//  Created by Riyaz J on 16-10-2026.
-//
-
 import AppKit
 import ApplicationServices
 
-/// Tracks windows for the currently active app and politely requests termination
-/// after its last observed window is destroyed. Accessibility notifications are best-effort.
+/// Event-driven, best-effort quit-on-close implementation.
+/// It only terminates after a standard window was observed and a successful
+/// Accessibility query confirms no standard windows remain. Query errors never mean zero windows.
 final class WindowCloseManager {
     private var workspaceObserver: NSObjectProtocol?
     private var terminationObserver: NSObjectProtocol?
     private var observers: [pid_t: AXObserver] = [:]
-    private var observedWindows: [pid_t: Set<String>] = [:]
-    private var appByPID: [pid_t: NSRunningApplication] = [:]
-
+    private var hadStandardWindow: Set<pid_t> = []
+    
+    // Finder is the macOS shell and should normally remain running when its last
+    // Finder window closes. Other regular apps are handled by this feature.
+    private let excludedBundleIdentifiers: Set<String> = ["com.apple.finder"]
+    
     func start() {
+        guard workspaceObserver == nil,
+              UserDefaults.standard.bool(forKey: "enableAutoQuit"),
+              PermissionsManager.hasAccessibility else { return }
+        
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -33,21 +34,14 @@ final class WindowCloseManager {
             queue: .main
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-            let pid = app.processIdentifier
-            
-            if let observer = self?.observers[pid] {
-                CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
-            }
-            self?.observers.removeValue(forKey: pid)
-            self?.observedWindows.removeValue(forKey: pid)
-            self?.appByPID.removeValue(forKey: pid)
+            self?.removeObserver(for: app.processIdentifier)
         }
         
         if let app = NSWorkspace.shared.frontmostApplication {
             observe(app)
         }
     }
-
+    
     func stop() {
         if let workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
@@ -58,96 +52,137 @@ final class WindowCloseManager {
         workspaceObserver = nil
         terminationObserver = nil
         
-        for (_, observer) in observers {
+        for observer in observers.values {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
         }
         observers.removeAll()
-        observedWindows.removeAll()
-        appByPID.removeAll()
+        hadStandardWindow.removeAll()
     }
-
+    
     private func observe(_ app: NSRunningApplication) {
         guard UserDefaults.standard.bool(forKey: "enableAutoQuit"),
+              PermissionsManager.hasAccessibility,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-              app.bundleIdentifier != "com.apple.finder",
               !app.isTerminated,
-              PermissionsManager.hasAccessibility else { return }
-
-        let pid = app.processIdentifier
-        let appElement = AXUIElementCreateApplication(pid)
-        var observer: AXObserver?
+              app.activationPolicy == .regular,
+              let bundleID = app.bundleIdentifier,
+              !excludedBundleIdentifiers.contains(bundleID) else { return }
         
-        // Capture the observer to find the PID later
+        let pid = app.processIdentifier
+        guard observers[pid] == nil else { return }
+        
         let callback: AXObserverCallback = { observer, element, notification, refcon in
             guard let refcon else { return }
             let manager = Unmanaged<WindowCloseManager>.fromOpaque(refcon).takeUnretainedValue()
-            
-            // Reverse lookup the PID attached to this specific observer
             guard let pid = manager.observers.first(where: { $0.value == observer })?.key else { return }
-            manager.windowDestroyed(element: element, notification: notification as String, pid: pid)
+            manager.handleAccessibilityNotification(
+                notification: notification as String,
+                pid: pid
+            )
         }
         
-        guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
-
+        var observerValue: AXObserver?
+        guard AXObserverCreate(pid, callback, &observerValue) == .success,
+              let observer = observerValue else { return }
+        
         observers[pid] = observer
-        appByPID[pid] = app
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
-
-        var windowsValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-              let windows = windowsValue as? [AXUIElement] else { return }
-
-        var identifiers = Set<String>()
-        for window in windows {
-            let identifier = windowIdentifier(window)
-            identifiers.insert(identifier)
-            AXObserverAddNotification(observer, window, kAXUIElementDestroyedNotification as CFString,
-                                      Unmanaged.passUnretained(self).toOpaque())
-        }
-        observedWindows[pid] = identifiers
+        
+        let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(appElement, 0.3)
+        
+        _ = AXObserverAddNotification(
+            observer,
+            appElement,
+            kAXWindowCreatedNotification as CFString,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+        
+        registerCurrentWindows(pid: pid, appElement: appElement, observer: observer)
     }
-
-    private func windowDestroyed(element: AXUIElement, notification: String, pid: pid_t) {
-        guard notification == (kAXUIElementDestroyedNotification as String) else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.recheckApp(pid: pid)
-        }
-    }
-
-    private func recheckApp(pid: pid_t) {
-        guard UserDefaults.standard.bool(forKey: "enableAutoQuit"),
-      let app = NSRunningApplication(processIdentifier: pid),
-      !app.isTerminated else { return }
-
-        let element = AXUIElementCreateApplication(pid)
-        var windowsValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-              let windows = windowsValue as? [AXUIElement] else {
-            app.terminate()
-            return
-        }
-
-        // Filter out hidden dummy windows (like Chrome/Safari background processes)
-        var standardWindowCount = 0
-        for window in windows {
-            var subrole: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole) == .success,
-               (subrole as? String) == (kAXStandardWindowSubrole as String) {
-                standardWindowCount += 1
+    
+    private func handleAccessibilityNotification(notification: String, pid: pid_t) {
+        if notification == (kAXWindowCreatedNotification as String) {
+            let appElement = AXUIElementCreateApplication(pid)
+            if let observer = observers[pid] {
+                registerCurrentWindows(pid: pid, appElement: appElement, observer: observer)
+            }
+        } else if notification == (kAXUIElementDestroyedNotification as String) {
+            // Defer one main-loop turn so the app can update its accessibility tree.
+            DispatchQueue.main.async { [weak self] in
+                self?.recheckApp(pid: pid)
             }
         }
-
-        if standardWindowCount == 0 {
-            app.terminate()
+    }
+    
+    private func registerCurrentWindows(pid: pid_t, appElement: AXUIElement, observer: AXObserver) {
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXWindowsAttribute as CFString,
+            &windowsValue
+        ) == .success,
+              let windows = windowsValue as? [AXUIElement] else {
+            return
+        }
+        
+        for window in windows {
+            var subroleValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleValue) == .success,
+               (subroleValue as? String) == (kAXStandardWindowSubrole as String) {
+                hadStandardWindow.insert(pid)
+            }
+            
+            _ = AXObserverAddNotification(
+                observer,
+                window,
+                kAXUIElementDestroyedNotification as CFString,
+                Unmanaged.passUnretained(self).toOpaque()
+            )
         }
     }
-
-    private func windowIdentifier(_ window: AXUIElement) -> String {
-        var titleValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleValue) == .success,
-           let title = titleValue as? String {
-            return title
+    
+    private func recheckApp(pid: pid_t) {
+        guard UserDefaults.standard.bool(forKey: "enableAutoQuit"),
+              hadStandardWindow.contains(pid),
+              let app = NSRunningApplication(processIdentifier: pid),
+              !app.isTerminated else { return }
+        
+        let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(appElement, 0.3)
+        
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXWindowsAttribute as CFString,
+            &windowsValue
+        ) == .success,
+              let windows = windowsValue as? [AXUIElement] else {
+            return
         }
-        return UUID().uuidString
+        
+        let hasStandardWindows = windows.contains { window in
+            var subroleValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                window,
+                kAXSubroleAttribute as CFString,
+                &subroleValue
+            ) == .success else {
+                // Unknown window types should not be treated as proof that no windows remain.
+                return true
+            }
+            return (subroleValue as? String) == (kAXStandardWindowSubrole as String)
+        }
+        
+        if !hasStandardWindows {
+            hadStandardWindow.remove(pid)
+            _ = app.terminate()
+        }
+    }
+    
+    private func removeObserver(for pid: pid_t) {
+        guard let observer = observers.removeValue(forKey: pid) else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        hadStandardWindow.remove(pid)
     }
 }
