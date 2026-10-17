@@ -1,8 +1,9 @@
 import AppKit
 import ApplicationServices
 
-/// Manages moving the focused window between connected displays using keyboard shortcuts.
-/// Based on the multi-display window transfer algorithms from Rectangle (rxhanson/Rectangle).
+/// Manages moving the focused window between connected displays and snapping windows
+/// to screen regions (Left Half, Right Half, Full Screen, and Default Centered Size).
+/// Based on the algorithms from Rectangle (rxhanson/Rectangle).
 final class DisplayMoveManager {
     
     enum Direction {
@@ -10,11 +11,17 @@ final class DisplayMoveManager {
         case previous
     }
     
+    enum SnapAction {
+        case leftHalf
+        case rightHalf
+        case fullScreen
+        case defaultSize // Centered with default width and height
+    }
+    
     /// Handles a key down event from the event tap.
-    /// Returns true if the event was a display move shortcut and was handled (should be suppressed).
+    /// Returns true if the event was handled and should be suppressed from the system.
     func handleKeyDown(_ event: CGEvent) -> Bool {
-        guard UserDefaults.standard.bool(forKey: "enableDisplayMove"),
-              PermissionsManager.hasAccessibility else {
+        guard PermissionsManager.hasAccessibility else {
             return false
         }
         
@@ -23,30 +30,137 @@ final class DisplayMoveManager {
         let isOption = flags.contains(.maskAlternate)
         let isCommand = flags.contains(.maskCommand)
         let isShift = flags.contains(.maskShift)
-        
-        // Shortcut must have Control + Option + Command, without Shift.
-        guard isControl && isOption && isCommand && !isShift else {
-            return false
-        }
-        
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let direction: Direction
         
-        if keyCode == 124 { // Right Arrow -> Next Display
-            direction = .next
-        } else if keyCode == 123 { // Left Arrow -> Previous Display
-            direction = .previous
-        } else {
-            return false
+        // MARK: - 1. Window Snapping (Control + Option, without Command or Shift)
+        if UserDefaults.standard.bool(forKey: "enableWindowSnap"),
+           isControl && isOption && !isCommand && !isShift {
+            let snapAction: SnapAction?
+            switch keyCode {
+            case 123: // Left Arrow -> Left Half
+                snapAction = .leftHalf
+            case 124: // Right Arrow -> Right Half
+                snapAction = .rightHalf
+            case 36, 126: // Return or Up Arrow -> Full Screen (Maximize)
+                snapAction = .fullScreen
+            case 8, 125: // C or Down Arrow -> Default Size (Centered)
+                snapAction = .defaultSize
+            default:
+                snapAction = nil
+            }
+            
+            if let snapAction {
+                DispatchQueue.main.async { [weak self] in
+                    self?.snapActiveWindow(action: snapAction)
+                }
+                return true
+            }
         }
         
-        // Execute asynchronously on the main queue to prevent blocking the event tap.
-        DispatchQueue.main.async { [weak self] in
-            self?.moveActiveWindow(direction: direction)
+        // MARK: - 2. Display Moving (2-3 keys: ⌃⌘ or ⌥⌘, or legacy 4 keys: ⌃⌥⌘)
+        if UserDefaults.standard.bool(forKey: "enableDisplayMove"), !isShift {
+            let isDisplayMoveModifiers =
+                (isControl && isCommand && !isOption) || // ⌃⌘ (3 keys)
+                (isOption && isCommand && !isControl) ||  // ⌥⌘ (3 keys)
+                (isControl && isOption && isCommand)      // ⌃⌥⌘ (4 keys)
+            
+            if isDisplayMoveModifiers {
+                let direction: Direction?
+                switch keyCode {
+                case 124: // Right Arrow -> Next Display
+                    direction = .next
+                case 123: // Left Arrow -> Previous Display
+                    direction = .previous
+                default:
+                    direction = nil
+                }
+                
+                if let direction {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.moveActiveWindow(direction: direction)
+                    }
+                    return true
+                }
+            }
         }
         
-        return true
+        return false
     }
+    
+    // MARK: - Window Snapping
+    
+    /// Snaps the focused window to a target layout (Left, Right, Full Screen, or Default Size)
+    /// within its current display's visible bounds.
+    func snapActiveWindow(action: SnapAction) {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        
+        guard let frontApp = NSWorkspace.shared.frontmostApplication,
+              !frontApp.isTerminated else {
+            return
+        }
+        
+        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+        AXUIElementSetMessagingTimeout(appElement, 0.3)
+        
+        guard let windowElement = getFocusedWindow(for: appElement) else {
+            return
+        }
+        
+        if isWindowFullScreen(windowElement) {
+            return
+        }
+        
+        guard let currentAXFrame = getWindowFrame(windowElement) else {
+            return
+        }
+        
+        let primaryHeight = screens[0].frame.height
+        let windowCocoaRect = axToCocoa(rect: currentAXFrame, primaryScreenHeight: primaryHeight)
+        let screen = findSourceScreen(for: windowCocoaRect, screens: screens)
+        let visible = screen.visibleFrame
+        
+        let targetCocoaRect: CGRect
+        switch action {
+        case .leftHalf:
+            let width = round(visible.width / 2)
+            targetCocoaRect = CGRect(
+                x: visible.minX,
+                y: visible.minY,
+                width: width,
+                height: visible.height
+            )
+        case .rightHalf:
+            let width = round(visible.width / 2)
+            targetCocoaRect = CGRect(
+                x: visible.maxX - width,
+                y: visible.minY,
+                width: width,
+                height: visible.height
+            )
+        case .fullScreen:
+            targetCocoaRect = CGRect(
+                x: visible.minX,
+                y: visible.minY,
+                width: visible.width,
+                height: visible.height
+            )
+        case .defaultSize:
+            let defaultWidth = min(visible.width, max(round(visible.width * 0.70), 960))
+            let defaultHeight = min(visible.height, max(round(visible.height * 0.80), 640))
+            targetCocoaRect = CGRect(
+                x: round(visible.minX + (visible.width - defaultWidth) / 2),
+                y: round(visible.minY + (visible.height - defaultHeight) / 2),
+                width: defaultWidth,
+                height: defaultHeight
+            )
+        }
+        
+        let targetAXRect = cocoaToAX(rect: targetCocoaRect, primaryScreenHeight: primaryHeight)
+        setWindowFrame(windowElement, targetRect: targetAXRect)
+    }
+    
+    // MARK: - Display Moving
     
     /// Moves the frontmost application's focused window to the next or previous display.
     func moveActiveWindow(direction: Direction) {
@@ -163,9 +277,9 @@ final class DisplayMoveManager {
               let sizeValue = AXValueCreate(.cgSize, &size) else { return }
         
         // Multi-step adjustment (from Rectangle's AccessibilityElement.setFrame):
-        // 1. Set size: shrinks the window if necessary before moving across displays.
-        // 2. Set position: moves window to the destination display.
-        // 3. Set size: expands the window if destination display has more space.
+        // 1. Set size: shrinks the window if necessary before moving across displays or resizing.
+        // 2. Set position: moves window to target position.
+        // 3. Set size: expands the window if display has more space.
         // 4. Set position: re-anchors the position in case resizing caused an origin shift.
         AXUIElementSetAttributeValue(windowElement, kAXSizeAttribute as CFString, sizeValue)
         AXUIElementSetAttributeValue(windowElement, kAXPositionAttribute as CFString, originValue)

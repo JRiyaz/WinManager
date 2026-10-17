@@ -50,7 +50,8 @@ final class FeatureController {
             "enableDockClick": true,
             "enableAltTab": true,
             "enableCleaningMode": false,
-            "enableDisplayMove": true
+            "enableDisplayMove": true,
+            "enableWindowSnap": true
         ])
         
         // Do not leave input locked following an app restart.
@@ -65,8 +66,7 @@ final class FeatureController {
             guard let self else { return event }
             
             if type == .keyDown {
-                if UserDefaults.standard.bool(forKey: "enableDisplayMove"),
-                   self.displayMoveManager.handleKeyDown(event) {
+                if self.displayMoveManager.handleKeyDown(event) {
                     return nil // Suppress original shortcut.
                 }
                 

@@ -15,6 +15,7 @@ struct MyApp: App {
     @AppStorage("enableDockClick") private var enableDockClick = true
     @AppStorage("enableAltTab") private var enableAltTab = true
     @AppStorage("enableDisplayMove") private var enableDisplayMove = true
+    @AppStorage("enableWindowSnap") private var enableWindowSnap = true
     @AppStorage("enableCleaningMode") private var enableCleaningMode = false
     
     /// A monochrome template version of the Win Manager mark for the menu bar.
@@ -55,6 +56,7 @@ struct MyApp: App {
             Toggle("Cut & Paste", isOn: $enableCommandX)
             Toggle("Dock Clicks", isOn: $enableDockClick)
             Toggle("App Switcher", isOn: $enableAltTab)
+            Toggle("Window Snapping", isOn: $enableWindowSnap)
             Toggle("Display Switcher", isOn: $enableDisplayMove)
             
             Button(enableCleaningMode ? "Stop Clean Mode" : "Clean Mode…") {
@@ -143,6 +145,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if defaults.object(forKey: "enableDisplayMove") == nil {
             defaults.set(true, forKey: "enableDisplayMove")
         }
+        if defaults.object(forKey: "enableWindowSnap") == nil {
+            defaults.set(true, forKey: "enableWindowSnap")
+        }
         
         defaults.register(defaults: [
             "enableAutoQuit": true,
@@ -154,7 +159,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "enableDockClick": true,
             "enableAltTab": true,
             "enableCleaningMode": false,
-            "enableDisplayMove": true
+            "enableDisplayMove": true,
+            "enableWindowSnap": true
         ])
         
         // Ask once at launch if either permission is missing. The menu's privacy
