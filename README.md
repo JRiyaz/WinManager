@@ -37,7 +37,11 @@ To list running regular applications without filtering hidden apps and to restor
 
 ## Scroll behavior
 
-There is one `Scroll Reverse` option. It reverses vertical deltas for discrete and continuous events. macOS does not reliably expose physical-device identity on each event, so this can also reverse trackpad or Magic Mouse gestures.
+`Scroll Reverse` provides independent direction control for external mice and trackpads, matching the behavior of Pilotmoon Scroll-Reverser.
+By default:
+- **External Mice:** Reversed (classic Windows-style scrolling).
+- **Trackpads:** Natural (untouched, with full gesture and momentum support).
+- Additional preferences (`Reverse Mouse`, `Reverse Trackpad`, `Reverse Horizontal`) can be customized via the **Scroll Options** submenu under Scroll Reverse in the menu.
 
 ## Quit on Close
 

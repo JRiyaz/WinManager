@@ -101,7 +101,7 @@ final class EventTapController {
         
         switch type {
         case .scrollWheel:
-            // ScrollReverseManager inverts vertical deltas; all scroll events are supported.
+            // ScrollReverseManager handles per-device reversal (mouse reversed, trackpad natural by default).
             let changed = UserDefaults.standard.bool(forKey: "enableScrollReverse")
             ? (onScroll?(event) ?? event)
             : event

@@ -42,6 +42,9 @@ final class FeatureController {
         defaults.register(defaults: [
             "enableAutoQuit": true,
             "enableScrollReverse": true,
+            "scrollReverseMouse": true,
+            "scrollReverseTrackpad": false,
+            "scrollReverseHorizontal": false,
             "enableCommandX": true,
             "enableDockClick": true,
             "enableAltTab": true,

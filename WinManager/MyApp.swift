@@ -8,6 +8,9 @@ struct MyApp: App {
     
     @AppStorage("enableAutoQuit") private var enableAutoQuit = true
     @AppStorage("enableScrollReverse") private var enableScrollReverse = true
+    @AppStorage("scrollReverseMouse") private var scrollReverseMouse = true
+    @AppStorage("scrollReverseTrackpad") private var scrollReverseTrackpad = false
+    @AppStorage("scrollReverseHorizontal") private var scrollReverseHorizontal = false
     @AppStorage("enableCommandX") private var enableCommandX = true
     @AppStorage("enableDockClick") private var enableDockClick = true
     @AppStorage("enableAltTab") private var enableAltTab = true
@@ -41,7 +44,14 @@ struct MyApp: App {
             
             Toggle("Quit on Close", isOn: $enableAutoQuit)
             Toggle("Scroll Reverse", isOn: $enableScrollReverse)
-            Toggle("Cut & Paste (⌘X)", isOn: $enableCommandX)
+            Menu("    Scroll Options") {
+                Toggle("Reverse Mouse", isOn: $scrollReverseMouse)
+                Toggle("Reverse Trackpad", isOn: $scrollReverseTrackpad)
+                Divider()
+                Toggle("Reverse Horizontal", isOn: $scrollReverseHorizontal)
+            }
+            .disabled(!enableScrollReverse)
+            Toggle("Cut & Paste", isOn: $enableCommandX)
             Toggle("Dock Clicks", isOn: $enableDockClick)
             Toggle("App Switcher", isOn: $enableAltTab)
             
@@ -102,6 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if defaults.integer(forKey: defaultsMigrationKey) < 1 {
             defaults.set(true, forKey: "enableAutoQuit")
             defaults.set(true, forKey: "enableScrollReverse")
+            defaults.set(true, forKey: "scrollReverseMouse")
+            defaults.set(false, forKey: "scrollReverseTrackpad")
+            defaults.set(false, forKey: "scrollReverseHorizontal")
             defaults.set(true, forKey: "enableCommandX")
             defaults.set(true, forKey: "enableDockClick")
             defaults.set(true, forKey: "enableAltTab")
@@ -115,9 +128,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaults.set(oldValue, forKey: "enableDockClick")
         }
         
+        if defaults.object(forKey: "scrollReverseMouse") == nil {
+            defaults.set(true, forKey: "scrollReverseMouse")
+        }
+        if defaults.object(forKey: "scrollReverseTrackpad") == nil {
+            defaults.set(false, forKey: "scrollReverseTrackpad")
+        }
+        if defaults.object(forKey: "scrollReverseHorizontal") == nil {
+            defaults.set(false, forKey: "scrollReverseHorizontal")
+        }
+        
         defaults.register(defaults: [
             "enableAutoQuit": true,
             "enableScrollReverse": true,
+            "scrollReverseMouse": true,
+            "scrollReverseTrackpad": false,
+            "scrollReverseHorizontal": false,
             "enableCommandX": true,
             "enableDockClick": true,
             "enableAltTab": true,
