@@ -7,6 +7,7 @@ final class FeatureController {
     private let switcherManager = SwitcherManager()
     private let dockManager = DockManager()
     private let windowCloseManager = WindowCloseManager()
+    private let displayMoveManager = DisplayMoveManager()
     
     private var cleaningModeTimeout: DispatchWorkItem?
     private var defaultsObserver: NSObjectProtocol?
@@ -48,7 +49,8 @@ final class FeatureController {
             "enableCommandX": true,
             "enableDockClick": true,
             "enableAltTab": true,
-            "enableCleaningMode": false
+            "enableCleaningMode": false,
+            "enableDisplayMove": true
         ])
         
         // Do not leave input locked following an app restart.
@@ -62,10 +64,16 @@ final class FeatureController {
         eventTapController.onKeyEvent = { [weak self] event, type in
             guard let self else { return event }
             
-            if type == .keyDown,
-               UserDefaults.standard.bool(forKey: "enableCommandX"),
-               self.commandXManager.handleKeyDown(event) {
-                return nil // Suppress original physical Cmd+X/Cmd+V.
+            if type == .keyDown {
+                if UserDefaults.standard.bool(forKey: "enableDisplayMove"),
+                   self.displayMoveManager.handleKeyDown(event) {
+                    return nil // Suppress original shortcut.
+                }
+                
+                if UserDefaults.standard.bool(forKey: "enableCommandX"),
+                   self.commandXManager.handleKeyDown(event) {
+                    return nil // Suppress original physical Cmd+X/Cmd+V.
+                }
             }
             
             return event

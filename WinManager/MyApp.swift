@@ -14,6 +14,7 @@ struct MyApp: App {
     @AppStorage("enableCommandX") private var enableCommandX = true
     @AppStorage("enableDockClick") private var enableDockClick = true
     @AppStorage("enableAltTab") private var enableAltTab = true
+    @AppStorage("enableDisplayMove") private var enableDisplayMove = true
     @AppStorage("enableCleaningMode") private var enableCleaningMode = false
     
     /// A monochrome template version of the Win Manager mark for the menu bar.
@@ -54,6 +55,7 @@ struct MyApp: App {
             Toggle("Cut & Paste", isOn: $enableCommandX)
             Toggle("Dock Clicks", isOn: $enableDockClick)
             Toggle("App Switcher", isOn: $enableAltTab)
+            Toggle("Display Switcher", isOn: $enableDisplayMove)
             
             Button(enableCleaningMode ? "Stop Clean Mode" : "Clean Mode…") {
                 if enableCleaningMode {
@@ -138,6 +140,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaults.set(false, forKey: "scrollReverseHorizontal")
         }
         
+        if defaults.object(forKey: "enableDisplayMove") == nil {
+            defaults.set(true, forKey: "enableDisplayMove")
+        }
+        
         defaults.register(defaults: [
             "enableAutoQuit": true,
             "enableScrollReverse": true,
@@ -147,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "enableCommandX": true,
             "enableDockClick": true,
             "enableAltTab": true,
-            "enableCleaningMode": false
+            "enableCleaningMode": false,
+            "enableDisplayMove": true
         ])
         
         // Ask once at launch if either permission is missing. The menu's privacy
