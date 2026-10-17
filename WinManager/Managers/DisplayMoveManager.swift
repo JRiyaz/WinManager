@@ -60,9 +60,9 @@ final class DisplayMoveManager {
         // MARK: - 2. Display Moving (2-3 keys: ⌃⌘ or ⌥⌘, or legacy 4 keys: ⌃⌥⌘)
         if UserDefaults.standard.bool(forKey: "enableDisplayMove"), !isShift {
             let isDisplayMoveModifiers =
-                (isControl && isCommand && !isOption) || // ⌃⌘ (3 keys)
-                (isOption && isCommand && !isControl) ||  // ⌥⌘ (3 keys)
-                (isControl && isOption && isCommand)      // ⌃⌥⌘ (4 keys)
+            (isControl && isCommand && !isOption) || // ⌃⌘ (3 keys)
+            (isOption && isCommand && !isControl) ||  // ⌥⌘ (3 keys)
+            (isControl && isOption && isCommand)      // ⌃⌥⌘ (4 keys)
             
             if isDisplayMoveModifiers {
                 let direction: Direction?
