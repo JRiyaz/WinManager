@@ -20,7 +20,3 @@ CLAUDE.md
 # macOS noise
 .DS_Store
 
-# Xcode / SwiftPM user state
-*.xcodeproj
-xcuserdata/
-.swiftpm/
