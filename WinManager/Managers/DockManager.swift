@@ -308,7 +308,23 @@ final class DockManager {
         }
         
         var minVal: CFTypeRef?
-        return AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minVal) == .success
+        guard AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minVal) == .success else {
+            return false
+        }
+        
+        // Filter out zero-size or invisible helper windows created by Electron/Chromium apps
+        var sizeVal: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeVal) == .success,
+           let sizeVal, CFGetTypeID(sizeVal) == AXValueGetTypeID() {
+            var size = CGSize.zero
+            if AXValueGetValue(sizeVal as! AXValue, .cgSize, &size) {
+                if size.width < 50 || size.height < 50 {
+                    return false
+                }
+            }
+        }
+        
+        return true
     }
     
     private func focusedWindow(for appElement: AXUIElement, within candidates: [AXUIElement]) -> AXUIElement? {
@@ -374,19 +390,77 @@ final class DockManager {
                   let string = value as? String,
                   !string.isEmpty else { continue }
             
-            if attribute == kAXURLAttribute,
-               let url = URL(string: string),
-               let bundleID = Bundle(url: url)?.bundleIdentifier,
-               let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
-                return app
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // 1. If it's a URL or POSIX path (e.g. file:///Applications/Visual Studio Code.app)
+            var fileURL: URL?
+            if trimmed.hasPrefix("file://") {
+                fileURL = URL(string: trimmed) ?? URL(string: trimmed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")
+            } else if trimmed.hasPrefix("/") {
+                fileURL = URL(fileURLWithPath: trimmed)
             }
             
-            if let app = NSWorkspace.shared.runningApplications.first(where: {
-                ($0.localizedName ?? "").localizedCaseInsensitiveCompare(string) == .orderedSame
-            }) {
-                return app
+            if let fileURL {
+                if let app = NSWorkspace.shared.runningApplications.first(where: {
+                    $0.bundleURL?.standardizedFileURL == fileURL.standardizedFileURL
+                }) {
+                    return app
+                }
+                if let bundleID = Bundle(url: fileURL)?.bundleIdentifier,
+                   let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+                    return app
+                }
+            }
+            
+            // 2. Check frontmost application first (fast path for active app dock clicks)
+            if let frontmost = NSWorkspace.shared.frontmostApplication,
+               matchesApp(frontmost, name: trimmed) {
+                return frontmost
+            }
+            
+            // 3. Match against all running applications
+            for app in NSWorkspace.shared.runningApplications {
+                if matchesApp(app, name: trimmed) {
+                    return app
+                }
             }
         }
         return nil
+    }
+    
+    private func matchesApp(_ app: NSRunningApplication, name: String) -> Bool {
+        // 1. Localized process name (e.g. "Code", "Antigravity")
+        if let locName = app.localizedName,
+           locName.localizedCaseInsensitiveCompare(name) == .orderedSame {
+            return true
+        }
+        
+        // 2. Bundle filename without extension (e.g. "Visual Studio Code")
+        if let bundleName = app.bundleURL?.deletingPathExtension().lastPathComponent,
+           bundleName.localizedCaseInsensitiveCompare(name) == .orderedSame {
+            return true
+        }
+        
+        // 3. Bundle filename with extension (e.g. "Visual Studio Code.app")
+        if let bundleFileName = app.bundleURL?.lastPathComponent,
+           bundleFileName.localizedCaseInsensitiveCompare(name) == .orderedSame {
+            return true
+        }
+        
+        // 4. Bundle display name from Info.plist
+        if let bundleURL = app.bundleURL,
+           let bundle = Bundle(url: bundleURL),
+           let displayName = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+           displayName.localizedCaseInsensitiveCompare(name) == .orderedSame {
+            return true
+        }
+        
+        // 5. Bundle identifier (e.g. "com.microsoft.VSCode")
+        if let bundleID = app.bundleIdentifier,
+           bundleID.localizedCaseInsensitiveCompare(name) == .orderedSame {
+            return true
+        }
+        
+        return false
     }
 }

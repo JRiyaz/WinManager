@@ -229,6 +229,18 @@ final class WindowCyclingManager {
             }
         }
         
+        // Exclude zero-size or invisible helper windows created by Electron/Chromium apps
+        var sizeVal: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeVal) == .success,
+           let sizeVal, CFGetTypeID(sizeVal) == AXValueGetTypeID() {
+            var size = CGSize.zero
+            if AXValueGetValue(sizeVal as! AXValue, .cgSize, &size) {
+                if size.width < 50 || size.height < 50 {
+                    return false
+                }
+            }
+        }
+        
         // Include minimized windows, but skip windows whose minimized state
         // cannot be read reliably.
         return minimizedState(of: window) != nil
