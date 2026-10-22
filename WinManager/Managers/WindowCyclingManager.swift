@@ -179,7 +179,7 @@ final class WindowCyclingManager {
         }
         
         let activated = app.activate(
-            options: [.activateIgnoringOtherApps]
+            options: []
         )
         
         let raised = AXUIElementPerformAction(

@@ -129,7 +129,7 @@ final class DockManager {
         // Handle inactive target app first: activate it instead of minimizing
         if !isFrontmost {
             if !unminimized.isEmpty {
-                let activated = targetApp.activate(options: [.activateIgnoringOtherApps])
+                let activated = targetApp.activate(options: [])
                 var raised = false
                 if let preferred = preferredWindow(for: appElement) ?? unminimized.first {
                     raised = (AXUIElementPerformAction(preferred, kAXRaiseAction as CFString) == .success)
@@ -145,7 +145,7 @@ final class DockManager {
                 
                 if AXUIElementSetAttributeValue(windowToRestore, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success {
                     state.minimizedOrder.removeAll { areEqual($0, windowToRestore) }
-                    targetApp.activate(options: [.activateIgnoringOtherApps])
+                    _ = targetApp.activate(options: [])
                     _ = AXUIElementPerformAction(windowToRestore, kAXRaiseAction as CFString)
                     
                     let remaining = minimized.filter { !areEqual($0, windowToRestore) }
@@ -205,7 +205,7 @@ final class DockManager {
             if AXUIElementSetAttributeValue(windowToRestore, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success {
                 // Remove only on successful restore
                 state.minimizedOrder.removeAll { areEqual($0, windowToRestore) }
-                targetApp.activate(options: [.activateIgnoringOtherApps])
+                _ = targetApp.activate(options: [])
                 _ = AXUIElementPerformAction(windowToRestore, kAXRaiseAction as CFString)
                 
                 let remainingMinimized = minimized.filter { !areEqual($0, windowToRestore) }
@@ -244,7 +244,7 @@ final class DockManager {
                 }
             }
             
-            let activated = targetApp.activate(options: [.activateIgnoringOtherApps])
+            let activated = targetApp.activate(options: [])
             var raised = false
             let preferred = preferredWindow(for: appElement) ?? unminimized.first ?? minimized.first
             if let preferred {
