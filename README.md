@@ -24,7 +24,7 @@ The menu is named **Win Manager** and contains features:
 1. Quit on Close
 2. Scroll Reverse (with Scroll Options submenu)
 3. Cut & Paste (⌘X)
-4. Dock Clicks
+4. Dock Clicks (with Dock Options submenu: Sequential and All Windows)
 5. App Switcher
 6. Window Snapping
 7. Display Switcher

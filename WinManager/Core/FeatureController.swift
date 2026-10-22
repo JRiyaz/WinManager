@@ -48,6 +48,7 @@ final class FeatureController {
             "scrollReverseHorizontal": false,
             "enableCommandX": true,
             "enableDockClick": true,
+            "dockClickBehavior": "sequential",
             "enableAltTab": true,
             "enableCleaningMode": false,
             "enableDisplayMove": true,

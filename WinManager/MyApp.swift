@@ -13,6 +13,7 @@ struct MyApp: App {
     @AppStorage("scrollReverseHorizontal") private var scrollReverseHorizontal = false
     @AppStorage("enableCommandX") private var enableCommandX = true
     @AppStorage("enableDockClick") private var enableDockClick = true
+    @AppStorage("dockClickBehavior") private var dockClickBehavior = "sequential"
     @AppStorage("enableAltTab") private var enableAltTab = true
     @AppStorage("enableDisplayMove") private var enableDisplayMove = true
     @AppStorage("enableWindowSnap") private var enableWindowSnap = true
@@ -55,6 +56,15 @@ struct MyApp: App {
             .disabled(!enableScrollReverse)
             Toggle("Cut & Paste", isOn: $enableCommandX)
             Toggle("Dock Clicks", isOn: $enableDockClick)
+            Menu("    Dock Options") {
+                Button(dockClickBehavior == "sequential" ? "✓ Sequential" : "    Sequential") {
+                    dockClickBehavior = "sequential"
+                }
+                Button(dockClickBehavior == "allAtOnce" ? "✓ All Windows" : "    All Windows") {
+                    dockClickBehavior = "allAtOnce"
+                }
+            }
+            .disabled(!enableDockClick)
             Toggle("App Switcher", isOn: $enableAltTab)
             Toggle("Window Snapping", isOn: $enableWindowSnap)
             Toggle("Display Switcher", isOn: $enableDisplayMove)
@@ -148,6 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if defaults.object(forKey: "enableWindowSnap") == nil {
             defaults.set(true, forKey: "enableWindowSnap")
         }
+        if defaults.object(forKey: "dockClickBehavior") == nil {
+            defaults.set("sequential", forKey: "dockClickBehavior")
+        }
         
         defaults.register(defaults: [
             "enableAutoQuit": true,
@@ -157,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "scrollReverseHorizontal": false,
             "enableCommandX": true,
             "enableDockClick": true,
+            "dockClickBehavior": "sequential",
             "enableAltTab": true,
             "enableCleaningMode": false,
             "enableDisplayMove": true,
