@@ -15,6 +15,7 @@ This ZIP is a *source patch*, not a complete `.xcodeproj`. It contains ten mutua
 - `CommandXManager.swift`
 - `DockManager.swift`
 - `DisplayMoveManager.swift`
+- `WindowCyclingManager.swift`
 
 Back up or commit your current project first. Replace file contents in the existing Xcode target rather than adding a second same-named file. Do not add a `QuitProtectionManager.swift`; this app version intentionally has no Quit Protection feature. Keep exactly one `WindowCloseManager.swift` in the target.
 
@@ -26,9 +27,10 @@ The menu is named **Win Manager** and contains features:
 3. Cut & Paste (⌘X)
 4. Dock Clicks (with Dock Options submenu: Sequential and All Windows)
 5. App Switcher
-6. Window Snapping
-7. Display Switcher
-8. Clean Mode
+6. Cycle Windows (⌘`)
+7. Window Snapping
+8. Display Switcher
+9. Clean Mode
 
 It uses exactly two dividers: after the app name and after the feature group. Clean Mode is the only feature disabled by default. It requires a confirmation dialog and automatically disables after 60 seconds.
 

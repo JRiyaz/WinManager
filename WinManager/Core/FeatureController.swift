@@ -8,6 +8,7 @@ final class FeatureController {
     private let dockManager = DockManager()
     private let windowCloseManager = WindowCloseManager()
     private let displayMoveManager = DisplayMoveManager()
+    private let windowCyclingManager = WindowCyclingManager()
     
     private var cleaningModeTimeout: DispatchWorkItem?
     private var defaultsObserver: NSObjectProtocol?
@@ -50,6 +51,7 @@ final class FeatureController {
             "enableDockClick": true,
             "dockClickBehavior": "sequential",
             "enableAltTab": true,
+            "enableWindowCycle": true,
             "enableCleaningMode": false,
             "enableDisplayMove": true,
             "enableWindowSnap": true
@@ -85,6 +87,14 @@ final class FeatureController {
             return self.switcherManager.handleSwitchHotkey(reverse: reverse)
         }
         
+        eventTapController.onWindowCycle = { [weak self] reverse in
+            guard let self,
+                  UserDefaults.standard.bool(forKey: "enableWindowCycle") else {
+                return false
+            }
+            return self.windowCyclingManager.handleHotkey(reverse: reverse)
+        }
+        
         eventTapController.onModifierReleased = { [weak self] in
             self?.switcherManager.executeSwitch()
         }
@@ -109,6 +119,7 @@ final class FeatureController {
         eventTapController.stop()
         windowCloseManager.stop()
         switcherManager.dismiss()
+        windowCyclingManager.reset()
         started = false
     }
     

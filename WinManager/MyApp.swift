@@ -15,6 +15,7 @@ struct MyApp: App {
     @AppStorage("enableDockClick") private var enableDockClick = true
     @AppStorage("dockClickBehavior") private var dockClickBehavior = "sequential"
     @AppStorage("enableAltTab") private var enableAltTab = true
+    @AppStorage("enableWindowCycle") private var enableWindowCycle = true
     @AppStorage("enableDisplayMove") private var enableDisplayMove = true
     @AppStorage("enableWindowSnap") private var enableWindowSnap = true
     @AppStorage("enableCleaningMode") private var enableCleaningMode = false
@@ -66,6 +67,7 @@ struct MyApp: App {
             }
             .disabled(!enableDockClick)
             Toggle("App Switcher", isOn: $enableAltTab)
+            Toggle("Cycle Windows (⌘`)", isOn: $enableWindowCycle)
             Toggle("Window Snapping", isOn: $enableWindowSnap)
             Toggle("Display Switcher", isOn: $enableDisplayMove)
             
@@ -161,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if defaults.object(forKey: "dockClickBehavior") == nil {
             defaults.set("sequential", forKey: "dockClickBehavior")
         }
+        if defaults.object(forKey: "enableWindowCycle") == nil {
+            defaults.set(true, forKey: "enableWindowCycle")
+        }
         
         defaults.register(defaults: [
             "enableAutoQuit": true,
@@ -172,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "enableDockClick": true,
             "dockClickBehavior": "sequential",
             "enableAltTab": true,
+            "enableWindowCycle": true,
             "enableCleaningMode": false,
             "enableDisplayMove": true,
             "enableWindowSnap": true

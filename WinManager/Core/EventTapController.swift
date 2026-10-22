@@ -8,6 +8,7 @@ final class EventTapController {
     var onScroll: ((CGEvent) -> CGEvent?)?
     var onKeyEvent: ((CGEvent, CGEventType) -> CGEvent?)?
     var onHotkey: ((Bool) -> Bool)?
+    var onWindowCycle: ((Bool) -> Bool)?
     var onModifierReleased: (() -> Void)?
     var onMouseDown: ((CGEvent) -> Bool)?
     
@@ -151,6 +152,20 @@ final class EventTapController {
                 if onHotkey?(reverse) == true {
                     suppressedKeyUps.insert(keyCode)
                     commandWasDown = true
+                    return nil
+                }
+            }
+            
+            // Cycle through windows of the frontmost app, including minimized windows.
+            if !synthetic,
+               keyCode == 50,
+               currentEvent.flags.contains(.maskCommand),
+               !currentEvent.flags.contains(.maskControl),
+               !currentEvent.flags.contains(.maskAlternate),
+               UserDefaults.standard.bool(forKey: "enableWindowCycle") {
+                let reverse = currentEvent.flags.contains(.maskShift)
+                if onWindowCycle?(reverse) == true {
+                    suppressedKeyUps.insert(keyCode)
                     return nil
                 }
             }
