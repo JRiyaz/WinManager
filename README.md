@@ -1,104 +1,170 @@
-# Win Manager — consistent source replacement set
+# Win Manager
 
-This ZIP is a *source patch*, not a complete `.xcodeproj`. It contains ten mutually aligned Swift files.
+**Bring familiar Windows-style window management and productivity shortcuts to macOS.**
 
-## Replace these existing files (do not add duplicate files to the target)
+Win Manager is a lightweight macOS menu bar utility that brings together window snapping, multi-display movement, app and window switching, mouse-scroll preferences, and other productivity features.
 
-- `MyApp.swift`
-- `EventTapController.swift`
-- `FeatureController.swift`
-- `ScrollReverseManager.swift`
-- `SwitcherManager.swift`
-- `AltTabOverlayView.swift`
-- `PermissionsManager.swift`
-- `WindowCloseManager.swift`
-- `CommandXManager.swift`
-- `DockManager.swift`
-- `DisplayMoveManager.swift`
-- `WindowCyclingManager.swift`
+> **Note:** Win Manager relies on macOS Accessibility and Input Monitoring permissions for system-wide interactions. Some behavior is best-effort because macOS does not expose public APIs for every Dock, window, or system-switcher interaction.
 
-Back up or commit your current project first. Replace file contents in the existing Xcode target rather than adding a second same-named file. Do not add a `QuitProtectionManager.swift`; this app version intentionally has no Quit Protection feature. Keep exactly one `WindowCloseManager.swift` in the target.
+## Features
 
-## Requested menu
+### 1. Quit on Close
+Automatically asks an application to quit after its last standard window is closed.
 
-The menu is named **Win Manager** and contains features:
-1. Quit on Close
-2. Scroll Reverse (with Scroll Options submenu)
-3. Cut & Paste (⌘X)
-4. Dock Clicks (with Dock Options submenu: Sequential and All Windows)
-5. App Switcher
-6. Cycle Windows (⌘`)
-7. Window Snapping
-8. Display Switcher
-9. Clean Mode
+- Uses Accessibility window-destruction notifications rather than continuous polling.
+- Checks that no standard windows remain before requesting termination.
+- Excludes Finder because it is part of the macOS shell.
+- Best-effort: applications differ in the window information they expose, and some intentionally remain open without windows.
 
-It uses exactly two dividers: after the app name and after the feature group. Clean Mode is the only feature disabled by default. It requires a confirmation dialog and automatically disables after 60 seconds.
+### 2. Scroll Reverse
+Configure scrolling direction independently for external mice and trackpads.
 
-In Xcode Target > Info, set **Bundle display name** to `Win Manager` if you also want Finder/System Settings to display that exact name.
+- **External mouse:** reversed by default for a Windows-style scrolling feel.
+- **Trackpad:** natural scrolling by default; continuous gestures and momentum are left intact.
+- **Reverse Mouse:** control mouse-wheel direction.
+- **Reverse Trackpad:** control trackpad direction.
+- **Reverse Horizontal:** optionally reverse horizontal scrolling.
 
-## Window Snapping & Display Switching
+The Scroll Options submenu lets you adjust behavior without changing the macOS-wide scrolling preference.
 
-Based on the window positioning and multi-display transfer algorithms from [Rectangle](https://github.com/rxhanson/Rectangle).
+### 3. Cut & Paste (⌘X)
+Adds a familiar cut-and-paste workflow for files in Finder.
 
-### Window Snapping (4 Layouts)
-Uses <kbd>⌃ Control</kbd> + <kbd>⌥ Option</kbd> without Command or Shift:
+- Select a file in Finder and press **⌘X**.
+- Navigate to the destination folder and press **⌘V**.
+- The selected item is moved to the destination.
 
-| Action | Shortcut Keys | Description |
-| :--- | :--- | :--- |
-| **Left Half** | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>←</kbd> | Snaps window to the left 50% of the display's usable frame |
-| **Right Half** | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>→</kbd> | Snaps window to the right 50% of the display's usable frame |
-| **Full Screen** | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>↩</kbd> *(or <kbd>⌃⌥↑</kbd>)* | Maximizes window across visible area (respecting menu bar & Dock) |
-| **Default Size** | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>C</kbd> *(or <kbd>⌃⌥↓</kbd>)* | Resizes to balanced dimensions (~70% width, ~80% height) and centers |
+This is intended for Finder file operations, not as a replacement for text editing's standard Cut command.
 
-### Display Switching (Multi-Monitor Support)
-Moves the frontmost window across connected displays while preserving edge alignments (e.g. snapped halves or maximized states) and proportional positioning:
+### 4. Dock Clicks
+Change what happens when you click an application's Dock icon.
 
-| Action | Simplified Shortcut (3 Keys) | Legacy Shortcut |
-| :--- | :--- | :--- |
-| **Next Display** | <kbd>⌃</kbd> + <kbd>⌘</kbd> + <kbd>→</kbd> *(or <kbd>⌥⌘→</kbd>)* | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>⌘</kbd> + <kbd>→</kbd> |
-| **Previous Display** | <kbd>⌃</kbd> + <kbd>⌘</kbd> + <kbd>←</kbd> *(or <kbd>⌥⌘←</kbd>)* | <kbd>⌃</kbd> + <kbd>⌥</kbd> + <kbd>⌘</kbd> + <kbd>←</kbd> |
+- Clicking the active app's Dock icon can minimize its focused window.
+- Clicking another app or a minimized app is left to macOS so it can activate or restore that app.
+- **Sequential** and **All Windows** options control how the feature handles an application's windows.
 
-## App Switcher behavior
+Dock accessibility information can vary between macOS versions, so Dock item detection is best-effort.
 
-To list running regular applications without filtering hidden apps and to restore minimized windows, the switcher is a custom no-preview app list styled with Apple's `NSVisualEffectView` material. Apple does not expose a public API to customize the exact built-in macOS Cmd+Tab list. This custom panel takes over Cmd+Tab when enabled, includes minimized/hidden *regular* apps, and attempts to restore and raise a selected minimized window using Accessibility. Apps with accessory/background-only activation policy are not included, and apps may decline activation or expose incomplete Accessibility data.
+### 5. App Switcher
+Use a custom app switcher with **⌘Tab**.
 
-## Scroll behavior
+- Displays running regular applications in a custom panel using Apple's system visual-effect material.
+- Supports forward and reverse cycling.
+- Includes hidden and minimized regular applications.
+- Attempts to restore and raise a selected minimized window using Accessibility.
 
-`Scroll Reverse` provides independent direction control for external mice and trackpads, matching the behavior of Pilotmoon Scroll-Reverser.
-By default:
-- **External Mice:** Reversed (classic Windows-style scrolling).
-- **Trackpads:** Natural (untouched, with full gesture and momentum support).
-- Additional preferences (`Reverse Mouse`, `Reverse Trackpad`, `Reverse Horizontal`) can be customized via the **Scroll Options** submenu under Scroll Reverse in the menu.
+Accessory and background-only apps are not included. macOS does not provide a public API to customize its built-in Cmd+Tab interface; Win Manager uses its own overlay and attempts to intercept the shortcut. System-reserved shortcut handling can vary by macOS version and configuration.
 
-## Quit on Close
+### 6. Cycle Windows (⌘`)
+Cycle between windows of the current application using **⌘`**.
 
-Uses Accessibility window notifications rather than polling. It attempts to terminate a regular app after a standard window was observed being destroyed and a successful follow-up query confirms no standard windows remain. Finder is excluded because it is the macOS shell. App-specific Accessibility limitations mean this feature is best-effort.
+### 7. Window Snapping
+Position the frontmost window using **Control (⌃) + Option (⌥)** shortcuts.
 
-## Required permissions
+| Action | Shortcut | Result |
+|---|---|---|
+| Left Half | `⌃` + `⌥` + `←` | Fits the window to the left half of the usable display area |
+| Right Half | `⌃` + `⌥` + `→` | Fits the window to the right half of the usable display area |
+| Full Screen / Maximize | `⌃` + `⌥` + `↩` or `⌃` + `⌥` + `↑` | Expands the window across the visible display area |
+| Default Size | `⌃` + `⌥` + `C` or `⌃` + `⌥` + `↓` | Resizes and centers the window (approximately 70% width and 80% height) |
 
-- **Input Monitoring:** needed for global keyboard and scroll event tap.
-- **Accessibility:** needed for window snapping, moving between displays, Dock detection, restoring minimized windows, and Quit on Close.
+Window positioning and multi-display transfer logic are based on ideas from [Rectangle](https://github.com/rxhanson/Rectangle).
 
-If permissions were previously denied, enable Win Manager under System Settings > Privacy & Security > Input Monitoring and Accessibility, then choose Refresh by relaunching/returning to the app as needed.
+### 8. Display Switcher
+Move the frontmost window between connected displays while preserving relative placement and edge alignment where possible.
 
-## Test checklist
+| Action | Shortcut | Result |
+|---|---|---|
+| Next Display | `⌃` + `⌘` + `→` or `⌥` + `⌘` + `→` | Moves the window to the next display |
+| Previous Display | `⌃` + `⌘` + `←` or `⌥` + `⌘` + `←` | Moves the window to the previous display |
 
-1. Build the `WinManager` scheme.
-2. Scroll vertically on a physical mouse; verify direction reverses. Test a trackpad too if available.
-3. In Finder, select a file, press Cmd+X, open another folder, press Cmd+V; verify it moves.
-4. Click the Dock icon of the active app with an unminimized window; it should minimize the focused window. Click a minimized app to let macOS restore it.
-5. Press Cmd+Tab: a system-material app list should open. Confirm a minimized app appears, select it, and check that its window is restored when Accessibility is granted.
-6. Test Window Snapping on active app:
-   - Press <kbd>⌃⌥←</kbd> to snap left half.
-   - Press <kbd>⌃⌥→</kbd> to snap right half.
-   - Press <kbd>⌃⌥↩</kbd> to maximize window to full screen.
-   - Press <kbd>⌃⌥C</kbd> to center window with default size.
-7. Test Display Switcher with an external monitor connected:
-   - Press <kbd>⌃⌘→</kbd> or <kbd>⌥⌘→</kbd> to transfer window to next display.
-   - Press <kbd>⌃⌘←</kbd> or <kbd>⌥⌘←</kbd> to transfer window back to previous display.
-8. Click Clean Mode; Cancel must leave input unchanged. Enable must block keyboard input and release automatically after 60 seconds; mouse should remain usable.
-9. Close the last standard window in a test app with Quit on Close enabled; verify it exits. Be aware macOS apps vary in how they expose windows.
+The transfer logic attempts to preserve snapped or maximized layouts and proportional positioning.
 
-## Validation status
+### 9. Clean Mode
+Temporarily blocks keyboard input while leaving the mouse usable.
 
-All files passed Swift syntax parsing and typechecking. This environment cannot perform an AppKit link/build or run the app on macOS, so the source still requires an Xcode build and runtime acceptance test on your Mac. Do not treat syntax parsing as proof that every runtime behavior is guaranteed.
+- Requires confirmation before activation.
+- Automatically turns off after **60 seconds**.
+- Disabled by default.
+- Useful for temporarily preventing accidental keyboard input.
+
+## Menu Bar
+Win Manager runs as a menu bar utility. Its menu includes:
+
+- Quit on Close
+- Scroll Reverse and Scroll Options
+- Cut & Paste
+- Dock Clicks and Dock Options
+- App Switcher
+- Cycle Windows
+- Window Snapping
+- Display Switcher
+- Clean Mode
+
+## Permissions
+
+| Permission | Used for |
+|---|---|
+| **Input Monitoring** | Listening for global keyboard shortcuts, mouse clicks, and scroll events |
+| **Accessibility** | Reading and controlling supported application windows, snapping and moving windows, Dock interaction, restoring minimized windows, and Quit on Close |
+
+To grant access:
+
+1. Open **System Settings → Privacy & Security**.
+2. Open **Input Monitoring** and enable Win Manager.
+3. Open **Accessibility** and enable Win Manager.
+4. If you have just changed permissions, quit and reopen Win Manager.
+
+macOS may show different wording or require a relaunch depending on the OS version.
+
+## Installation
+
+1. Clone or download this repository.
+2. Open `WinManager.xcodeproj` in Xcode.
+3. Select the **WinManager** scheme and your Mac as the run destination.
+4. Configure signing with your Apple Developer team if Xcode requires it.
+5. Build and run the app.
+6. Grant Input Monitoring and Accessibility permissions when prompted or from System Settings.
+
+For a standalone copy, use **Product → Archive** in Xcode and follow the distribution flow appropriate for your build.
+
+## macOS Compatibility and Limitations
+
+- Win Manager is a regular user-session menu bar application, not a system daemon. It runs while the user is logged in and the app is running.
+- Global event monitoring is subject to macOS privacy permissions and event-tap restrictions.
+- Disabling App Sandbox does **not** bypass Accessibility or Input Monitoring protections.
+- The built-in macOS app switcher is system-controlled. The custom switcher can only provide a best-effort replacement for its shortcut and presentation.
+- Accessibility data and Dock structure differ between applications and macOS releases. Window movement, Dock hit-testing, minimized-window restoration, and Quit on Close may not work with every app.
+- Applications can refuse activation, expose incomplete window data, or intentionally remain running without windows.
+- Window snapping and display movement depend on the target application's support for Accessibility window positioning.
+
+## Development Notes
+
+- **Language:** Swift
+- **UI:** SwiftUI / Menu Bar
+- **System integration:** AppKit, Core Graphics event taps, and Accessibility APIs
+- **Window layout inspiration:** [Rectangle](https://github.com/rxhanson/Rectangle)
+- **Scroll behavior inspiration:** [Scroll Reverser](https://github.com/pilotmoon/scroll-reverser)
+
+## Testing Checklist
+
+- [ ] Test mouse and trackpad scrolling independently.
+- [ ] Test all Scroll Options combinations, including horizontal scrolling.
+- [ ] Test Finder Cut & Paste with files and folders.
+- [ ] Test Dock clicks with active, inactive, and minimized applications.
+- [ ] Test App Switcher forward and reverse cycling, including hidden and minimized apps.
+- [ ] Test Cycle Windows with an app that has multiple windows.
+- [ ] Test all four Window Snapping layouts.
+- [ ] Test Display Switcher with two or more connected displays.
+- [ ] Verify Clean Mode confirmation, keyboard blocking, and automatic 60-second timeout.
+- [ ] Test Quit on Close with a disposable app that has no unsaved work.
+- [ ] Re-test after revoking and re-granting privacy permissions and after sleep/wake.
+
+## Acknowledgements
+
+- [Rectangle](https://github.com/rxhanson/Rectangle) for window positioning and display-transfer inspiration.
+- [Scroll Reverser](https://github.com/pilotmoon/scroll-reverser) for scroll-direction behavior inspiration.
+
+---
+
+**Win Manager** — practical Windows-style workflows for macOS.
